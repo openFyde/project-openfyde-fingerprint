@@ -72,7 +72,7 @@ Index: biod/lib_fp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.h
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,144 @@
 +// Copyright 2018 The Chromium OS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -204,15 +204,14 @@ Index: biod/lib_fp_device.h
 +  std::bitset<32> dirty_;
 +  std::thread thread_;
 +
-+  FpContext *fp_context_;
-+  FpDevice *fp_device_;
-+  GCancellable *cancellable_;
-+  GPtrArray *fprints_;
++  FpContext *fp_context_ = NULL;
++  FpDevice *fp_device_ = NULL;
++  GCancellable *cancellable_ = NULL;
++  GPtrArray *fprints_ = NULL;
 +  pthread_t self_pid_;
 +  std::unique_ptr<base::FileDescriptorWatcher::Controller> watcher_;
 +  base::ScopedFD read_fd_;
 +  base::ScopedFD write_fd_;
-+
 +};
 +
 +}  // namespace biod
@@ -222,7 +221,7 @@ Index: biod/lib_fp_device.cc
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.cc
-@@ -0,0 +1,608 @@
+@@ -0,0 +1,611 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -337,16 +336,19 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +LibFpDevice::~LibFpDevice() {
-+  if (cancellable_) {
++  LOG(INFO) << __func__;
++  if (fp_device_ && mode_ != FpMode(FpMode::Mode::kNone)) {
 +    ResetFpDevice();
-+    g_clear_object(&cancellable_);
-+  }
-+  if(fp_device_ && fp_device_is_open(fp_device_) &&
-+    !fp_device_close_sync(fp_device_, NULL, NULL))
++    if (cancellable_)
++      g_clear_object(&cancellable_);
++    if (fp_device_is_open(fp_device_) && !fp_device_close_sync(fp_device_, NULL, NULL))
 +      LOG(ERROR) << "Failed to close fingerprinter " << fp_device_get_name(fp_device_);
-+  g_ptr_array_free(fprints_, true);
-+  g_object_unref(fp_device_);
-+  g_object_unref(fp_context_);
++    g_object_unref(fp_device_);
++  }
++  if (fprints_)
++    g_ptr_array_free(fprints_, true);
++  if (fp_context_)
++    g_object_unref(fp_context_);
 +  g_libfpdev = NULL;
 +  LOG(INFO) << "LibFpDevice released.";
 +}
@@ -402,8 +404,8 @@ Index: biod/lib_fp_device.cc
 +    return false;
 +  }
 +
-+  //if (mode_ == FpMode(FpMode::Mode::kEnrollSessionEnrollImage) ||
-+  //    mode_ == FpMode(FpMode::Mode::kMatch)) {
++  if (mode_ == FpMode(FpMode::Mode::kEnrollSessionEnrollImage) ||
++      mode_ == FpMode(FpMode::Mode::kMatch)) {
 +    LOG(ERROR) << "Reset from kMatch/kEnroll";
 +    if (!g_cancellable_is_cancelled(cancellable_)) {
 +      g_cancellable_cancel(cancellable_);
@@ -413,7 +415,7 @@ Index: biod/lib_fp_device.cc
 +    if (thread_.joinable())
 +      thread_.join();
 +    LOG(ERROR) << "End cancell";
-+ // }
++  }
 +
 +  mode_ = FpMode(FpMode::Mode::kNone);
 +  last_result_ = 0;
@@ -810,7 +812,7 @@ Index: biod/lib_fp_device.cc
 +  read_fd_ = base::ScopedFD(p[0]);
 +  write_fd_ = base::ScopedFD(p[1]);
 +  devices = fp_context_get_devices(fp_context_);
-+  if (!devices && !devices->len && devices->len < 1) {
++  if (!devices || !devices->len || devices->len < 1) {
 +    LOG(ERROR) << "No fingerprint found!";
 +		return false;
 +  }
