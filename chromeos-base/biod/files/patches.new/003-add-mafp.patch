@@ -1,0 +1,703 @@
+Index: biod/fyde_mafp_device.cc
+===================================================================
+--- /dev/null
++++ biod/fyde_mafp_device.cc
+@@ -0,0 +1,463 @@
++// Copyright 2022 The FydeOS Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++// Author: Yang Tsao<yang@fydeos.io>
++
++#include "biod/fyde_mafp_device.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <functional>
++
++#include <algorithm>
++
++#include <base/bind.h>
++#include <base/callback_helpers.h>
++#include <base/check.h>
++#include <base/logging.h>
++#include <base/optional.h>
++#include <base/strings/string_number_conversions.h>
++#include <base/strings/stringprintf.h>
++#include <chromeos/ec/ec_commands.h>
++#include <chrono>
++#include <base/metrics/crc32.h>
++#include "biod/cros_fp_device.h"
++
++using ec::FpMode;
++using ec::EcCmdVersionSupportStatus;
++
++#define MAX_TEMPLATE_COUNT 5
++#define TEMPLATE_FORMAT_VERSION 0x1
++#define MAFP_FINGERPRINT_HARDWARE_MODULE_ID "microarray.fingerprint"
++#define DEFAULT_ACTIVE_GROUP 0
++#define DEFAULT_STORAGE_DIR "/var/lib/mafp"
++#define CAST_TO_MAFP(context) (reinterpret_cast<MafpDevice*>(context))
++
++namespace {
++
++  inline uint32_t Crc32(const void* buffer, uint32_t len) {
++    return ~base::Crc32(std::numeric_limits<uint32_t>::max(), buffer, len);
++  }
++
++  uint32_t GetMatchIDX(uint32_t index) {
++      return index << EC_MKBP_FP_MATCH_IDX_OFFSET;
++  }
++
++	uint32_t GetEnrollProgress(int progress, int nr) {
++    /*
++	  if (progress == nr)
++	    return 99 << EC_MKBP_FP_ENROLL_PROGRESS_OFFSET;
++		*/
++	  return ((uint32_t)((progress * 100) / nr)) << EC_MKBP_FP_ENROLL_PROGRESS_OFFSET;
++	}
++
++  std::string ErrorCodeToMessage(fingerprint_error_t err) {
++    switch (err) {
++      case FINGERPRINT_ERROR_HW_UNAVAILABLE:
++        return "ERROR_HW_UNAVAILABLE";
++      case FINGERPRINT_ERROR_UNABLE_TO_PROCESS:
++        return "ERROR_UNABLE_TO_PROCESS";
++      case FINGERPRINT_ERROR_TIMEOUT:
++        return "ERROR_TIMEOUT";
++      case FINGERPRINT_ERROR_NO_SPACE:
++        return "ERROR_NO_SPACE";
++      case FINGERPRINT_ERROR_CANCELED:
++        return "ERROR_CANCELED";
++      case FINGERPRINT_ERROR_UNABLE_TO_REMOVE:
++        return "ERROR_UNABLE_TO_REMOVE";
++      case FINGERPRINT_ERROR_LOCKOUT:
++        return "ERROR_LOCKOUT";
++      case FINGERPRINT_ERROR_AUTHENTICATED:
++        return "ERROR_AUTHENTICATED";
++      default:
++        return "UNKNOWN_ERROR";
++    }
++  }
++
++  uint32_t TransMafpDeviceMsgToCrosFpEvent(fingerprint_acquired_info_t code, FpMode& mode) {
++    bool enroll = mode == FpMode(FpMode::Mode::kEnrollSessionEnrollImage);
++    bool match = mode == FpMode(FpMode::Mode::kMatch);
++    bool keyup = mode == FpMode(FpMode::Mode::kEnrollSessionFingerUp)
++                 || mode == FpMode(FpMode::Mode::kFingerUp);
++    switch (code) {
++      case FINGERPRINT_ACQUIRED_GOOD:
++        return 0;
++      case FINGERPRINT_ACQUIRED_PARTIAL:
++      case FINGERPRINT_ACQUIRED_INSUFFICIENT:
++      case FINGERPRINT_ACQUIRED_IMAGER_DIRTY:
++        if (enroll)
++          return EC_MKBP_FP_ENROLL | EC_MKBP_FP_ERR_ENROLL_LOW_QUALITY;
++        else if (match)
++          return EC_MKBP_FP_MATCH | EC_MKBP_FP_ERR_MATCH_NO_LOW_QUALITY;
++        else
++          return 0;
++      case FINGERPRINT_ACQUIRED_TOO_SLOW:
++      case FINGERPRINT_ACQUIRED_TOO_FAST:
++        if (enroll)
++          return EC_MKBP_FP_ENROLL | EC_MKBP_FP_ERR_ENROLL_LOW_COVERAGE;
++        else if (match)
++          return EC_MKBP_FP_MATCH | EC_MKBP_FP_ERR_MATCH_NO_LOW_COVERAGE;
++        else
++          return 0;
++      case FINGERPRINT_ACQUIRED_BASE_DOWN:
++        return 0;
++      case FINGERPRINT_ACQUIRED_BASE_UP:
++        return  keyup ? EC_MKBP_FP_FINGER_UP: 0;
++      default:
++        return 0;
++    }
++  }
++
++} //namespace
++
++namespace biod {
++	MafpDevice *g_mafp_device = NULL;
++
++  bool MafpDevice::SupportsPositiveMatchSecret() {
++    return true;
++  }
++
++  std::optional<brillo::SecureVector> MafpDevice::GetPositiveMatchSecret(int index) {
++    LOG(INFO) << __func__ << " index:" << index;
++    if (index == CrosFpDevice::kLastTemplate) {
++      auto opt_index = GetIndexOfLastTemplate();
++      if (!opt_index)
++        return std::nullopt;
++      index = *opt_index;
++    }
++    std::unique_ptr<VendorTemplate> templ = GetTemplateInternal(index);
++    if (!templ)
++      return std::nullopt;
++    LOG(INFO) << __func__ << " get secret data.";
++    uint32_t sec_data = Crc32(templ->data(), templ->size());
++    brillo::SecureVector secret(sizeof sec_data);
++    std::memcpy(secret.data(), &sec_data, sizeof sec_data);
++    return secret;
++  }
++
++  void MafpDevice::SetMkbpEventCallback(MkbpCallback callback) {
++    mkbp_event_ = callback;
++  }
++
++  MafpDevice::~MafpDevice() {
++    if (!mDevice_) {
++      ResetFpDevice();
++      mDevice_->close(mDevice_);
++    }
++    mDevice_ = NULL;
++		g_mafp_device = NULL;
++  }
++
++  std::optional<CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
++    return std::nullopt;
++  }
++
++  bool MafpDevice::InitEntropy(bool reset) {
++    return true;
++  }
++
++  std::optional<std::string> MafpDevice::ReadVersion() {
++    return std::string("1.0");
++  }
++
++  EcCmdVersionSupportStatus MafpDevice::EcCmdVersionSupported(uint16_t cmd_code,
++                                                              uint32_t ver) {
++    return EcCmdVersionSupportStatus::UNSUPPORTED;
++  }
++
++  bool MafpDevice::UpdateFpInfo() {
++    return true;
++  }
++
++  int MafpDevice::MaxTemplateCount() {
++    return MAX_TEMPLATE_COUNT;
++  }
++
++  int MafpDevice::TemplateVersion() {
++    return TEMPLATE_FORMAT_VERSION;
++  }
++
++  int MafpDevice::DeadPixelCount() {
++    return 0;
++  }
++
++  FpMode MafpDevice::GetFpMode() {
++    return mode_;
++  }
++
++  std::optional<std::bitset<32>> MafpDevice::GetDirtyMap() {
++    return dirty_;
++  }
++
++  bool MafpDevice::Init() {
++    int ret = 0;
++    ret = fingerprint_open(MAFP_FINGERPRINT_HARDWARE_MODULE_ID, &mDevice_);
++    if (ret || !mDevice_) {
++      LOG(ERROR) << "Open fingerprint device failed.";
++      return false;
++    }
++    ret = mDevice_->set_active_group(mDevice_, DEFAULT_ACTIVE_GROUP, DEFAULT_STORAGE_DIR);
++    if (ret) {
++      LOG(ERROR) << "Set active group failed.";
++      mDevice_->close(mDevice_);
++      return false;
++    }
++		g_mafp_device = this;
++    ret = mDevice_->set_notify(mDevice_, &MafpDevice::OnHalNotify);
++    mode_ = FpMode(FpMode::Mode::kNone);
++    LOG(INFO) << "Got device:" << mDevice_->dev_info.name;
++    return true;
++  }
++
++  bool MafpDevice::ResetContext() {
++    if (mode_ != FpMode(FpMode::Mode::kNone))
++      LOG(ERROR) << "Attempting to reset context with mode: " << mode_;
++    CHECK(biod_metrics_);
++    biod_metrics_->SendResetContextMode(mode_);
++    templates_.clear();
++    gid_ = 0;
++    return SetContext(std::string());
++  }
++
++  bool MafpDevice::ResetFpDevice() {
++    enroll_counter_ = 0;
++    return SetFpMode(FpMode(FpMode::Mode::kNone));
++  }
++
++  bool MafpDevice::SetContext(std::string user_hex) {
++    bool success = true;
++    FpMode original_mode = mode_;
++    if (mode_ == FpMode(FpMode::Mode::kModeInvalid)) {
++      LOG(ERROR) << "Unable to get FP Mode.";
++      success = false;
++    }
++		if (original_mode == FpMode(FpMode::Mode::kMatch)) {
++      LOG(INFO) << "Attempting to set context with match mode.";
++      success = ResetFpDevice();
++    } else if (original_mode != FpMode(FpMode::Mode::kNone)) {
++      LOG(ERROR) << "Attempting to set context with mode: " << original_mode;
++      success = false;
++    }
++    biod_metrics_->SendSetContextMode(original_mode);
++		if (original_mode == FpMode(FpMode::Mode::kMatch)) {
++      SetFpMode(original_mode);
++    }
++    biod_metrics_->SendSetContextSuccess(success);
++    user_hex_ = user_hex;
++    if (!user_hex_.empty()) {
++      gid_ = Crc32(user_hex_.c_str(), user_hex_.size());
++      if (mDevice_->set_active_group(mDevice_, gid_, DEFAULT_STORAGE_DIR)) {
++        LOG(ERROR) << "set active group failed, gid:" << gid_
++          << " storage:" << DEFAULT_STORAGE_DIR;
++        success = false;
++      }
++    }
++    return success;
++  }
++
++  void MafpDevice::OnError(const fingerprint_error_t err) {
++    LOG(ERROR) << "Error: " << ErrorCodeToMessage(err);
++    if (err == FINGERPRINT_ERROR_NO_SPACE)
++      mDevice_->enumerate(mDevice_);
++    if (mode_ == FpMode(FpMode::Mode::kMatch))
++      mkbp_event_.Run(EC_MKBP_FP_MATCH | EC_MKBP_FP_ERR_MATCH_NO_INTERNAL);
++    if (mode_ == FpMode(FpMode::Mode::kEnrollSessionEnrollImage))
++      mkbp_event_.Run(EC_MKBP_FP_ENROLL | EC_MKBP_FP_ERR_ENROLL_INTERNAL);
++  }
++
++  void MafpDevice::OnAcquire(const fingerprint_acquired_t *acq) {
++    uint32_t result = TransMafpDeviceMsgToCrosFpEvent(acq->acquired_info,
++                  mode_);
++    if (result)
++      mkbp_event_.Run(result);
++  }
++
++  void MafpDevice::OnEnroll(const fingerprint_enroll_t *data) {
++    uint32_t result = EC_MKBP_FP_ENROLL;
++    enroll_counter_++;
++    LOG(INFO) << __func__ << " enroll_counter:" << enroll_counter_
++      << " remain:" << data->samples_remaining;
++    result |= GetEnrollProgress(enroll_counter_, enroll_counter_ + data->samples_remaining);
++    if (!data->samples_remaining) {
++      if (data->finger.fid) {
++        templates_.push_back(data->finger.fid);
++        dirty_.set(templates_.size() - 1);
++        result |= EC_MKBP_FP_ERR_ENROLL_OK;
++        mDevice_->post_enroll(mDevice_);
++        LOG(INFO) << "enroll success.";
++      } else {
++        result |= EC_MKBP_FP_ERR_ENROLL_INTERNAL;
++      }
++    } else {
++      result |= EC_MKBP_FP_ERR_ENROLL_OK;
++    }
++    mkbp_event_.Run(result);
++  }
++
++  void MafpDevice::OnRemove(const fingerprint_removed_t *data) {
++    const fingerprint_finger_id_t *finger = &data->finger;
++    LOG(INFO) << "Remove finger template, gid:" << finger->gid << " fid:" << finger->fid;
++    RemoveOneShouldRemovedTemplate();
++  }
++
++  void MafpDevice:: OnAuthenticate(const fingerprint_authenticated_t *data) {
++    uint32_t result = EC_MKBP_FP_MATCH;
++    const fingerprint_finger_id_t *finger = &data->finger;
++    if (finger->fid) {
++      auto it = std::find(templates_.begin(), templates_.end(), finger->fid);
++      if (it != templates_.end()) {
++        result |= GetMatchIDX(it - templates_.begin()) | EC_MKBP_FP_ERR_MATCH_YES;
++      } else {
++        result |= EC_MKBP_FP_ERR_MATCH_NO;
++      }
++    } else {
++      result |= EC_MKBP_FP_ERR_MATCH_NO;
++    }
++    mkbp_event_.Run(result);
++  }
++
++  void MafpDevice::OnEnumerate(const fingerprint_enumerated_t *data) {
++    const fingerprint_finger_id_t *finger = &data->finger;
++    uint32_t remaining = data->remaining_templates;
++    auto it = std::find(templates_.begin(), templates_.end(), finger->fid);
++    if (it == templates_.end())
++      should_removed_templates_.insert(finger->fid);
++    if (!remaining && should_removed_templates_.size())
++      RemoveOneShouldRemovedTemplate();
++  }
++
++  void MafpDevice::RemoveOneShouldRemovedTemplate() {
++    auto it = should_removed_templates_.begin();
++    if (it != should_removed_templates_.end()) {
++      mDevice_->remove(mDevice_, gid_, *it);
++      should_removed_templates_.erase(it);
++    }
++  }
++
++  void MafpDevice::OnHalNotify(const fingerprint_msg_t *msg) {
++		if (!g_mafp_device)
++			return;
++    switch (msg->type) {
++      case FINGERPRINT_ERROR:
++        g_mafp_device->OnError(msg->data.error);
++        break;
++      case FINGERPRINT_ACQUIRED:
++        g_mafp_device->OnAcquire(&msg->data.acquired);
++        break;
++      case FINGERPRINT_TEMPLATE_ENROLLING:
++        g_mafp_device->OnEnroll(&msg->data.enroll);
++        break;
++      case FINGERPRINT_TEMPLATE_REMOVED:
++        g_mafp_device->OnRemove(&msg->data.removed);
++        break;
++      case FINGERPRINT_AUTHENTICATED:
++        g_mafp_device->OnAuthenticate(&msg->data.authenticated);
++        break;
++      case FINGERPRINT_TEMPLATE_ENUMERATING:
++        g_mafp_device->OnEnumerate(&msg->data.enumerated);
++        break;
++      default:
++        LOG(WARNING) << "Got unknown notify:" << static_cast<int>(msg->type);
++    }
++  }
++
++  bool MafpDevice::SetFpMode(const FpMode& mode) {
++    LOG(INFO) << "Set mode:" << mode;
++    switch (mode.EnumVal()) {
++      case static_cast<int>(FpMode::Mode::kResetSensor):
++        LOG(INFO) << "reset sensor";
++        return false;
++      case static_cast<int>(FpMode::Mode::kEnrollSessionEnrollImage):
++        if (!enroll_counter_) {
++          mDevice_->pre_enroll(mDevice_);
++          mDevice_->enroll(mDevice_, NULL, gid_, 120);
++          LOG(INFO) << "enter enroll";
++        } else {
++          LOG(INFO) << "continue enroll";
++        }
++        break;
++      case static_cast<int>(FpMode::Mode::kEnrollSessionFingerUp):
++      case static_cast<int>(FpMode::Mode::kFingerUp):
++        break;
++      case static_cast<int>(FpMode::Mode::kMatch):
++        {
++          if (templates_.size() == 0)
++            return false;
++          int64_t authenticator_id = mDevice_->get_authenticator_id(mDevice_);
++          mDevice_->authenticate(mDevice_, authenticator_id, gid_);
++        }
++        break;
++      case static_cast<int>(FpMode::Mode::kSensorMaintenance):
++        LOG(INFO) << "sensor maintenance";
++        return false;
++      case static_cast<int>(FpMode::Mode::kNone):
++        if (mode_ != mode)
++          mDevice_->cancel(mDevice_);
++        mode_ = mode;
++        break;
++      default:
++        LOG(WARNING) << "Got unknown mode:" << mode.EnumVal();
++        return false;
++    };
++    mode_ = mode;
++    return true;
++  }
++
++  base::Optional<int> MafpDevice::GetIndexOfLastTemplate() {
++    if (templates_.size() < 1)
++      return std::nullopt;
++    return templates_.size() - 1;
++  }
++
++  std::unique_ptr<VendorTemplate> MafpDevice::GetTemplateInternal(int index) {
++    LOG(INFO) << __func__;
++    fingerprint_finger_id_t finger = {
++      .gid = gid_,
++      .fid = templates_[index],
++    };
++    struct ec_fp_template_encryption_metadata meta = {
++      .struct_version = TEMPLATE_FORMAT_VERSION
++    };
++    size_t total_size = sizeof meta + sizeof finger;
++    std::unique_ptr<VendorTemplate> tmpl(new VendorTemplate(total_size));
++    auto *meta_array = reinterpret_cast<const char*>(&meta);
++    auto *finger_array = reinterpret_cast<const char*>(&finger);
++    auto *pos = tmpl->data();
++    std::memcpy(pos, meta_array, sizeof meta);
++    std::memcpy(pos + sizeof meta, finger_array, sizeof finger);
++    return tmpl;
++  }
++
++  std::unique_ptr<VendorTemplate> MafpDevice::GetTemplate(int index) {
++		if (index == CrosFpDevice::kLastTemplate) {
++	    auto opt_index = GetIndexOfLastTemplate();
++	    if (!opt_index)
++	      return nullptr;
++	    index = *opt_index;
++	    if (!dirty_.test(index))
++	      return nullptr;
++	  }
++	  dirty_.set(index, false);
++	  return GetTemplateInternal(index);
++  }
++
++	bool MafpDevice::UploadTemplate(const VendorTemplate& tmpl) {
++    LOG(INFO) << __func__;
++    if (templates_.size() >= MaxTemplateCount() ||
++        tmpl.size() < sizeof(ec_fp_template_encryption_metadata) + sizeof(fingerprint_finger_id_t)) {
++      biod_metrics_->SendUploadTemplateResult(EC_RES_OVERFLOW);
++      return false;
++    }
++    auto *pos = &tmpl[sizeof(ec_fp_template_encryption_metadata)];
++    fingerprint_finger_id_t finger;
++    std::memcpy(&finger, pos, sizeof finger);
++    if (finger.gid != gid_) {
++      biod_metrics_->SendUploadTemplateResult(EC_RES_INVALID_DATA_CRC);
++      return false;
++    }
++    templates_.push_back(finger.fid);
++    biod_metrics_->SendUploadTemplateResult(EC_RES_SUCCESS);
++    return true;
++	}
++} //biod
+Index: biod/fyde_mafp_device.h
+===================================================================
+--- /dev/null
++++ biod/fyde_mafp_device.h
+@@ -0,0 +1,134 @@
++// Copyright 2022 The FydeOS Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++#ifndef BIOD_MAFP_DEVICE_H_
++#define BIOD_MAFP_DEVICE_H_
++
++#include <bitset>
++#include <memory>
++#include <set>
++#include <string>
++#include <utility>
++#include <vector>
++#include <optional>
++#include <thread>
++
++#include <base/files/file_descriptor_watcher_posix.h>
++#include <base/files/file_util.h>
++#include <libec/ec_command_factory.h>
++#include <libec/fingerprint/fp_info_command.h>
++#include <libec/fingerprint/fp_mode.h>
++#include <pthread.h>
++
++#include "biod/biod_metrics.h"
++#include "biod/cros_fp_device_interface.h"
++
++extern "C" {
++#include <mafp_interfaces.h>
++}
++
++namespace biod {
++
++class MafpDevice : public CrosFpDeviceInterface {
++ public:
++  static std::unique_ptr<MafpDevice> Create(
++      BiodMetricsInterface* biod_metrics,
++      std::unique_ptr<ec::EcCommandFactoryInterface> ec_command_factory) {
++    // Using new to access non-public constructor.
++    // See https://abseil.io/tips/134.
++    auto dev = base::WrapUnique(
++        new MafpDevice(biod_metrics, std::move(ec_command_factory)));
++    if (!dev->Init()) {
++      return nullptr;
++    }
++    return dev;
++  }
++
++  void SetMkbpEventCallback(MkbpCallback callback) override;
++
++  // Run a simple command to get the version information from FP MCU and check
++  // whether the image type returned is the same as |expected_image|.
++  static bool WaitOnEcBoot(const base::ScopedFD& cros_fp_fd,
++                           ec_current_image expected_image);
++
++  // Run a simple command to get the version information from FP MCU.
++  static std::optional<EcVersion> GetVersion(const base::ScopedFD& cros_fp_fd);
++
++  // CrosFpDeviceInterface overrides:
++  ~MafpDevice() override;
++
++  CrosFpDeviceInterface::CrosFpType GetDeviceType() override {
++    return CrosFpDeviceInterface::CrosFpType::LIB_FP;
++  }
++  bool SetFpMode(const ec::FpMode& mode) override;
++  ec::FpMode GetFpMode() override;
++  std::optional<CrosFpDeviceInterface::FpStats> GetFpStats() override;
++  std::optional<std::bitset<32>> GetDirtyMap() override;
++  bool SupportsPositiveMatchSecret() override;
++  std::optional<brillo::SecureVector> GetPositiveMatchSecret(
++      int index) override;
++  std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
++  bool UploadTemplate(const VendorTemplate& tmpl) override;
++  bool SetContext(std::string user_id) override;
++  bool ResetContext() override;
++  // Initialise the entropy in the SBP. If |reset| is true, the old entropy
++  // will be deleted. If |reset| is false, we will only add entropy, and only
++  // if no entropy had been added before.
++  bool InitEntropy(bool reset) override;
++  bool UpdateFpInfo() override;
++
++  int MaxTemplateCount() override;
++  int TemplateVersion() override;
++  int DeadPixelCount() override;
++
++  ec::EcCmdVersionSupportStatus EcCmdVersionSupported(uint16_t cmd,
++                                                      uint32_t ver) override;
++
++ protected:
++  MafpDevice(
++      BiodMetricsInterface* biod_metrics,
++      std::unique_ptr<ec::EcCommandFactoryInterface> ec_command_factory)
++      : ec_command_factory_(std::move(ec_command_factory)),
++        biod_metrics_(biod_metrics),
++        mode_(ec::FpMode(ec::FpMode::Mode::kModeInvalid)) {}
++
++  bool Init();
++
++  base::Optional<std::string> ReadVersion();
++
++ private:
++  // Get block id from rollback info.
++  void OnError(fingerprint_error_t error);
++  void OnAcquire(const fingerprint_acquired_t *acq);
++  void OnEnroll(const fingerprint_enroll_t *data);
++  void OnRemove(const fingerprint_removed_t *data);
++  void OnAuthenticate(const fingerprint_authenticated_t *data);
++  void OnEnumerate(const fingerprint_enumerated_t *data);
++  void RemoveOneShouldRemovedTemplate();
++
++  static void OnHalNotify(const fingerprint_msg_t *msg);
++  base::Optional<int> GetIndexOfLastTemplate();
++
++  bool ResetFpDevice();
++
++  std::unique_ptr<VendorTemplate> GetTemplateInternal(int index);
++
++  std::unique_ptr<ec::EcCommandFactoryInterface> ec_command_factory_;
++  MkbpCallback mkbp_event_;
++  uint32_t enroll_counter_;
++
++  BiodMetricsInterface* biod_metrics_ = nullptr;  // Not owned.
++  ec::FpMode mode_;
++  std::string user_hex_;
++  uint32_t gid_;
++  std::bitset<32> dirty_;
++
++  fingerprint_device_t *mDevice_ = nullptr;
++  std::vector<uint32_t> templates_;
++  std::set<uint32_t> should_removed_templates_;
++
++};
++
++}  // namespace biod
++
++#endif  // BIOD_MAFP_DEVICE_H_
+Index: biod/cros_fp_biometrics_manager.h
+===================================================================
+--- biod.orig/cros_fp_biometrics_manager.h
++++ biod/cros_fp_biometrics_manager.h
+@@ -18,6 +18,8 @@
+ #include <base/timer/timer.h>
+ #if defined(LIB_FPRINT)
+ #include "biod/lib_fp_device.h"
++#elif defined(MAFP)
++#include "biod/fyde_mafp_device.h"
+ #endif
+ #include "biod/cros_fp_device.h"
+ #include "biod/cros_fp_record_manager.h"
+Index: biod/biometrics_daemon.cc
+===================================================================
+--- biod.orig/biometrics_daemon.cc
++++ biod/biometrics_daemon.cc
+@@ -431,6 +431,9 @@ BiometricsDaemon::BiometricsDaemon() {
+ #if defined(LIB_FPRINT)
+   auto cros_fp_device = LibFpDevice::Create(
+     biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
++#elif defined(MAFP)
++  auto cros_fp_device = MafpDevice::Create(
++    biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
+ #else
+   auto cros_fp_device = CrosFpDevice::Create(
+       biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
+Index: biod/BUILD.gn
+===================================================================
+--- biod.orig/BUILD.gn
++++ biod/BUILD.gn
+@@ -56,12 +56,17 @@ pkg_config("target_defaults") {
+   } else {
+     pkg_deps += [ "protobuf-lite" ]
+   }
+-  if (use.libfprint) {
++  if (!use.mafp) {
+     pkg_deps += [
+       "libfprint-2",
+       "glib-2.0",
+      ]
+     defines += [ "LIB_FPRINT" ]
++  } else {
++    pkg_deps += [
++      "libmafp",
++    ]
++    defines += [ "MAFP" ]
+   }
+ }
+ 
+@@ -75,7 +80,6 @@ static_library("libbiod") {
+     "biometrics_daemon.cc",
+     "cros_fp_biometrics_manager.cc",
+     "cros_fp_device.cc",
+-    "lib_fp_device.cc",
+     "cros_fp_firmware.cc",
+     "cros_fp_record_manager.cc",
+     "crypto_init/bio_crypto_init.cc",
+@@ -86,6 +90,11 @@ static_library("libbiod") {
+     "updater/update_utils.cc",
+     "utils.cc",
+   ]
++  if (use.mafp) {
++    sources += [ "fyde_mafp_device.cc" ]
++  } else {
++    sources += [ "lib_fp_device.cc" ]
++  }
+   configs += [ ":target_defaults" ]
+   pkg_deps = [ "vboot_host" ]
+ }
+Index: biod/init/biod.conf
+===================================================================
+--- biod.orig/init/biod.conf
++++ biod/init/biod.conf
+@@ -9,15 +9,20 @@ start on started system-services and sta
+ stop on stopping system-services
+ respawn
+ respawn limit 3 10  # if the job respawns 3 times in 10 seconds, stop trying.
++oom score -100
+ 
+ env LOG_DIR=/var/log/biod
+ env G_MESSAGES_DEBUG=
+ env LIBUSB_DEBUG=
++env FPDEV=/dev/madev0
++env FPDEV_STORE=/var/lib/mafp
+ 
+ pre-start script
+   mkdir -m 755 -p "${LOG_DIR}"
+   chown biod:biod "${LOG_DIR}"
+-  # Check the existence of ${FP_DEV}.
++  mkdir -m 755 -p "${FPDEV_STORE}" # croslint: disable:
++  chown biod:biod "${FPDEV_STORE}" # croslint: disable:
++  chown biod:biod "${FPDEV}" # croslint: disable:
+ end script
+ 
+ # Here (in order) are a list of the args added:

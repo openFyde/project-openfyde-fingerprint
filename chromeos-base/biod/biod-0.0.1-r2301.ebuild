@@ -28,6 +28,7 @@ IUSE="
 	fpmcu_firmware_nocturne
 	fuzzer
   libfprint
+  mafp
 "
 
 COMMON_DEPEND="
@@ -60,6 +61,7 @@ RDEPEND+="
 		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
 	)
   libfprint? ( sys-auth/libfprint )
+  mafp? ( sys-auth/libmafp )
 "
 
 DEPEND="
@@ -101,3 +103,8 @@ PATCHES=(
   ${FILESDIR}/patches.new/001-add-libfprint.patch
   ${FILESDIR}/patches.new/002-update-biod-conf.patch
   )
+
+src_prepare() {
+  default
+  use mafp && eapply ${FILESDIR}/patches.new/003-add-mafp.patch
+}

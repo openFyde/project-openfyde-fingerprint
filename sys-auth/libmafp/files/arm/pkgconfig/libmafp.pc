@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=/usr
+libdir=/usr/lib
+includedir=${prefix}/include
+
+Name: libmafp
+Description: mafp fringer printer Interface
+Version: 0.1
+Libs: -L${libdir} -lmafp
+Cflags: -I${includedir}

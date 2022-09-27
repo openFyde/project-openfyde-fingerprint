@@ -13,11 +13,12 @@ PLATFORM_SUBDIR="biod"
 inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform udev user
 
 DESCRIPTION="Biometrics Daemon for Chromium OS"
-HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/master/biod/README.md"
+HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/biod/README.md"
 
 LICENSE="BSD-Google"
 KEYWORDS="~*"
 IUSE="
+	factory_branch
 	fp_on_power_button
 	fpmcu_firmware_bloonchipper
 	fpmcu_firmware_dartmonkey
@@ -25,6 +26,7 @@ IUSE="
 	fpmcu_firmware_nocturne
 	fuzzer
   libfprint
+  mafp
 "
 
 COMMON_DEPEND="
@@ -43,18 +45,21 @@ COMMON_DEPEND+="
 RDEPEND="
 	${COMMON_DEPEND}
 	sys-apps/flashrom
-	virtual/chromeos-firmware-fpmcu
+	!factory_branch? ( virtual/chromeos-firmware-fpmcu )
 	"
 
 # Release branch firmware.
 # The USE flags below come from USE_EXPAND variables.
 # See third_party/chromiumos-overlay/profiles/base/make.defaults.
 RDEPEND+="
-	fpmcu_firmware_bloonchipper? ( sys-firmware/chromeos-fpmcu-release-bloonchipper )
-	fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
-	fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
-	fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
+	!factory_branch? (
+		fpmcu_firmware_bloonchipper? ( sys-firmware/chromeos-fpmcu-release-bloonchipper )
+		fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
+		fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
+		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
+	)
   libfprint? ( sys-auth/libfprint )
+  mafp? ( sys-auth/libmafp )
 "
 
 DEPEND="
@@ -71,32 +76,7 @@ pkg_setup() {
 }
 
 src_install() {
-	dobin "${OUT}"/biod
-
-	dobin "${OUT}"/bio_crypto_init
-	dobin "${OUT}"/bio_wash
-
-	dosbin "${OUT}"/bio_fw_updater
-
-	into /usr/local
-	dobin "${OUT}"/biod_client_tool
-
-	insinto /usr/share/policy
-	local seccomp_src_dir="init/seccomp"
-
-	newins "${seccomp_src_dir}/biod-seccomp-${ARCH}.policy" \
-		biod-seccomp.policy
-
-	newins "${seccomp_src_dir}/bio-crypto-init-seccomp-${ARCH}.policy" \
-		bio-crypto-init-seccomp.policy
-	insinto /etc/init
-  if use libfprint; then
-    doins ${FILESDIR}/init/*.conf
-  else
-	  doins init/*.conf
-  fi
-	insinto /etc/dbus-1/system.d
-	doins dbus/org.chromium.BiometricsDaemon.conf
+	platform_install
 
 	udev_dorules udev/99-biod.rules
 
@@ -114,5 +94,5 @@ src_install() {
 }
 
 platform_pkg_test() {
-	platform_test "run" "${OUT}/biod_test_runner"
+	platform test_all
 }
