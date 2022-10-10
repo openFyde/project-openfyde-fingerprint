@@ -35,7 +35,7 @@ src_compile() {
 }
 
 src_install() {
-  dolib.so ${S_DIR}/libmafp.so
+  dolib.so ${S_DIR}/*.so
   insinto /usr/$(get_libdir)/pkgconfig
   doins ${S_DIR}/pkgconfig/libmafp.pc
   insinto /usr/include

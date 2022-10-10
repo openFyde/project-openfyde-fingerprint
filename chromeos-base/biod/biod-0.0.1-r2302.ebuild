@@ -2,8 +2,8 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
-CROS_WORKON_COMMIT="54c7fac37782fd4a975d5ac8982da4ef9423fda7"
-CROS_WORKON_TREE=("d897a7a44e07236268904e1df7f983871c1e1258" "7dfe57cb6547ab8a3c3bf0e1b5c9b6fb740c068a" "3a8b816b9fdaca04ec76e8a8d97b206e139a9dfc" "ad1fd2e4d4c9cb42d85d97fe12f958890ad6ab14" "e08a2eb734e33827dffeecf57eca046cd1091373" "e7dba8c91c1f3257c34d4a7ffff0ea2537aeb6bb")
+CROS_WORKON_COMMIT="473eeaa9bfc2a4cf8c4e941f6008d7e6eae1981e"
+CROS_WORKON_TREE=("2345346c6533c29d4e3ee84bc2bf53306247256c" "03c245e8a7503c58d08260388aa2efdb1e78bb11" "29d2f0fcd2444371bf2152eb9ffc9904ade26fea" "34fa0ea2975f272c5ba242aae3871139ec790782" "55976c0a11bc37a530f8d4c14ae732300e17ccd9" "e7dba8c91c1f3257c34d4a7ffff0ea2537aeb6bb")
 CROS_WORKON_USE_VCSID="1"
 CROS_WORKON_LOCALNAME="platform2"
 CROS_WORKON_PROJECT="chromiumos/platform2"
@@ -15,11 +15,12 @@ PLATFORM_SUBDIR="biod"
 inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform udev user
 
 DESCRIPTION="Biometrics Daemon for Chromium OS"
-HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/master/biod/README.md"
+HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/biod/README.md"
 
 LICENSE="BSD-Google"
 KEYWORDS="*"
 IUSE="
+	factory_branch
 	fp_on_power_button
 	fpmcu_firmware_bloonchipper
 	fpmcu_firmware_dartmonkey
@@ -27,6 +28,7 @@ IUSE="
 	fpmcu_firmware_nocturne
 	fuzzer
   libfprint
+  mafp
 "
 
 COMMON_DEPEND="
@@ -45,18 +47,21 @@ COMMON_DEPEND+="
 RDEPEND="
 	${COMMON_DEPEND}
 	sys-apps/flashrom
-	virtual/chromeos-firmware-fpmcu
+	!factory_branch? ( virtual/chromeos-firmware-fpmcu )
 	"
 
 # Release branch firmware.
 # The USE flags below come from USE_EXPAND variables.
 # See third_party/chromiumos-overlay/profiles/base/make.defaults.
 RDEPEND+="
-	fpmcu_firmware_bloonchipper? ( sys-firmware/chromeos-fpmcu-release-bloonchipper )
-	fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
-	fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
-	fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
+	!factory_branch? (
+		fpmcu_firmware_bloonchipper? ( sys-firmware/chromeos-fpmcu-release-bloonchipper )
+		fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
+		fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
+		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
+	)
   libfprint? ( sys-auth/libfprint )
+  mafp? ( sys-auth/libmafp )
 "
 
 DEPEND="
@@ -73,33 +78,7 @@ pkg_setup() {
 }
 
 src_install() {
-	dobin "${OUT}"/biod
-
-	dobin "${OUT}"/bio_crypto_init
-#	dobin "${OUT}"/bio_wash
-
-#	dosbin "${OUT}"/bio_fw_updater
-
-	into /usr/local
-	dobin "${OUT}"/biod_client_tool
-
-	insinto /usr/share/policy
-	local seccomp_src_dir="init/seccomp"
-
-	newins "${seccomp_src_dir}/biod-seccomp-${ARCH}.policy" \
-		biod-seccomp.policy
-
-	newins "${seccomp_src_dir}/bio-crypto-init-seccomp-${ARCH}.policy" \
-		bio-crypto-init-seccomp.policy
-
-	insinto /etc/init
-  if use libfprint; then
-    doins ${FILESDIR}/init/*.conf
-  else
-      doins init/*.conf
-  fi
-	insinto /etc/dbus-1/system.d
-	doins dbus/org.chromium.BiometricsDaemon.conf
+	platform_install
 
 	udev_dorules udev/99-biod.rules
 
@@ -117,10 +96,15 @@ src_install() {
 }
 
 platform_pkg_test() {
-	platform_test "run" "${OUT}/biod_test_runner"
+	platform test_all
 }
 
 PATCHES=(
   ${FILESDIR}/patches/001-add-libfprint.patch
-  ${FILESDIR}/patches/002-update-to-r102.patch
+  ${FILESDIR}/patches/002-update-biod-conf.patch
   )
+
+src_prepare() {
+  default
+  use mafp && eapply ${FILESDIR}/patches/003-add-mafp.patch
+}

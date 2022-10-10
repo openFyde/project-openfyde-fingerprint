@@ -223,27 +223,31 @@ int32_t main(int argc, char *argv[])
             mDevices->enroll(mDevices, &token, DEFAULT_ACTIVE_GROUP, 60);
             printf("process_finish:%d\n", process_finish);
             while(!process_finish)
-              sleep(0.1);
+              sleep(1);
             printf("enroll complete, token info: challenge:%lu, user_id:%lu, authenticator_id:%lu, type:%u\n",
             token.challenge, token.user_id, token.authenticator_id, token.authenticator_type);
             break;
         case ACTION_VERIFY:
             authenticator_id = mDevices->get_authenticator_id(mDevices);
             mDevices->authenticate(mDevices, authenticator_id, DEFAULT_ACTIVE_GROUP);
-            while(!process_finish);
+            while(!process_finish)
+              sleep(1);
             break;
         case ACTION_SEARCH:
             authenticator_id = mDevices->get_authenticator_id(mDevices);
             mDevices->authenticate(mDevices, authenticator_id, DEFAULT_ACTIVE_GROUP);
-            while(!process_finish);
+            while(!process_finish)
+              sleep(1);
             break;
         case ACTION_DELETE:
             mDevices->remove(mDevices, DEFAULT_ACTIVE_GROUP, 0);
-            while(!process_finish);
+            while(!process_finish)
+              sleep(1);
             break;
         case ACTION_ENUMERATE:
             mDevices->enumerate(mDevices);
-            while(!process_finish);
+            while(!process_finish)
+              sleep(1);
             break;
         default:
             printf("No action execute!\n");

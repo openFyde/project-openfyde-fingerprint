@@ -2,7 +2,7 @@ Index: biod/BUILD.gn
 ===================================================================
 --- biod.orig/BUILD.gn
 +++ biod/BUILD.gn
-@@ -27,8 +27,9 @@ group("all") {
+@@ -30,8 +30,9 @@ group("all") {
  pkg_config("target_defaults") {
    # TODO(crbug.com/993557): Remove |fp_on_power_button| USE flag when nocturne
    # is EOL.
@@ -13,7 +13,7 @@ Index: biod/BUILD.gn
    }
  
    # NOSORT
-@@ -52,6 +53,13 @@ pkg_config("target_defaults") {
+@@ -55,6 +56,13 @@ pkg_config("target_defaults") {
    } else {
      pkg_deps += [ "protobuf-lite" ]
    }
@@ -27,14 +27,14 @@ Index: biod/BUILD.gn
  }
  
  static_library("libbiod") {
-@@ -64,6 +72,7 @@ static_library("libbiod") {
+@@ -67,6 +75,7 @@ static_library("libbiod") {
      "biometrics_daemon.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
 +    "lib_fp_device.cc",
      "cros_fp_firmware.cc",
+     "cros_fp_record_manager.cc",
      "crypto_init/bio_crypto_init.cc",
-     "power_button_filter.cc",
 Index: biod/cros_fp_device.h
 ===================================================================
 --- biod.orig/cros_fp_device.h
@@ -49,13 +49,23 @@ Index: biod/cros_fp_device.h
 +
    bool SetFpMode(const ec::FpMode& mode) override;
    ec::FpMode GetFpMode() override;
-   base::Optional<FpStats> GetFpStats() override;
+   std::optional<FpStats> GetFpStats() override;
+@@ -60,6 +64,9 @@ class CrosFpDevice : public CrosFpDevice
+       int index) override;
+   std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
+   bool UploadTemplate(const VendorTemplate& tmpl) override;
++  bool RemoveTemplate(const VendorTemplate& tmpl) override {
++    return true;
++  }
+   bool SetContext(std::string user_id) override;
+   bool ResetContext() override;
+   // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 Index: biod/cros_fp_device_interface.h
 ===================================================================
 --- biod.orig/cros_fp_device_interface.h
 +++ biod/cros_fp_device_interface.h
 @@ -40,6 +40,13 @@ class CrosFpDeviceInterface {
-     ec_current_image current_image = EC_IMAGE_UNKNOWN;
+     ec_image current_image = EC_IMAGE_UNKNOWN;
    };
  
 +  enum class CrosFpType:int {
@@ -68,11 +78,19 @@ Index: biod/cros_fp_device_interface.h
    virtual void SetMkbpEventCallback(MkbpCallback callback) = 0;
  
    struct FpStats {
+@@ -60,6 +67,7 @@ class CrosFpDeviceInterface {
+       int index) = 0;
+   virtual std::unique_ptr<VendorTemplate> GetTemplate(int index) = 0;
+   virtual bool UploadTemplate(const VendorTemplate& tmpl) = 0;
++  virtual bool RemoveTemplate(const VendorTemplate& tmpl) = 0;
+   virtual bool SetContext(std::string user_id) = 0;
+   virtual bool ResetContext() = 0;
+   // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 Index: biod/lib_fp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.h
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,146 @@
 +// Copyright 2018 The Chromium OS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -84,11 +102,11 @@ Index: biod/lib_fp_device.h
 +#include <string>
 +#include <utility>
 +#include <vector>
++#include <optional>
 +#include <thread>
 +
 +#include <base/files/file_descriptor_watcher_posix.h>
 +#include <base/files/file_util.h>
-+#include <base/optional.h>
 +#include <libec/ec_command_factory.h>
 +#include <libec/fingerprint/fp_info_command.h>
 +#include <libec/fingerprint/fp_mode.h>
@@ -127,7 +145,7 @@ Index: biod/lib_fp_device.h
 +                           ec_current_image expected_image);
 +
 +  // Run a simple command to get the version information from FP MCU.
-+  static base::Optional<EcVersion> GetVersion(const base::ScopedFD& cros_fp_fd);
++  static std::optional<EcVersion> GetVersion(const base::ScopedFD& cros_fp_fd);
 +
 +  // CrosFpDeviceInterface overrides:
 +  ~LibFpDevice() override;
@@ -137,13 +155,14 @@ Index: biod/lib_fp_device.h
 +  }
 +  bool SetFpMode(const ec::FpMode& mode) override;
 +  ec::FpMode GetFpMode() override;
-+  base::Optional<CrosFpDeviceInterface::FpStats> GetFpStats() override;
-+  base::Optional<std::bitset<32>> GetDirtyMap() override;
++  std::optional<CrosFpDeviceInterface::FpStats> GetFpStats() override;
++  std::optional<std::bitset<32>> GetDirtyMap() override;
 +  bool SupportsPositiveMatchSecret() override;
-+  base::Optional<brillo::SecureVector> GetPositiveMatchSecret(
++  std::optional<brillo::SecureVector> GetPositiveMatchSecret(
 +      int index) override;
 +  std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
 +  bool UploadTemplate(const VendorTemplate& tmpl) override;
++  bool RemoveTemplate(const VendorTemplate& tmpl) override;
 +  bool SetContext(std::string user_id) override;
 +  bool ResetContext() override;
 +  // Initialise the entropy in the SBP. If |reset| is true, the old entropy
@@ -192,6 +211,7 @@ Index: biod/lib_fp_device.h
 +  void ReportResult(uint32_t result);
 +  void HandleStorageFull();
 +  void OnEventReadable();
++  std::unique_ptr<VendorTemplate> GetTemplateInternal(int index);
 +  std::unique_ptr<ec::EcCommandFactoryInterface> ec_command_factory_;
 +  MkbpCallback mkbp_event_;
 +  uint32_t last_result_;
@@ -221,7 +241,7 @@ Index: biod/lib_fp_device.cc
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.cc
-@@ -0,0 +1,611 @@
+@@ -0,0 +1,651 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -243,6 +263,7 @@ Index: biod/lib_fp_device.cc
 +#include <base/strings/stringprintf.h>
 +#include <chromeos/ec/ec_commands.h>
 +#include <chrono>
++#include <base/metrics/crc32.h>
 +#include "biod/cros_fp_device.h"
 +
 +#define LIB_FP_TEMPLATE_FORMAT_VERSION 0x1
@@ -310,6 +331,10 @@ Index: biod/lib_fp_device.cc
 +  fp_print_set_enroll_date(fp, date);
 +}
 +
++static inline uint32_t Crc32(const void* buffer, uint32_t len) {
++  return ~base::Crc32(std::numeric_limits<uint32_t>::max(), buffer, len);
++}
++
 +} //namespace
 +
 +
@@ -323,12 +348,26 @@ Index: biod/lib_fp_device.cc
 +LibFpDevice *g_libfpdev = NULL;
 +
 +bool LibFpDevice::SupportsPositiveMatchSecret() {
-+  return false;
++  return true;
 +}
 +
-+base::Optional<brillo::SecureVector> LibFpDevice::GetPositiveMatchSecret(
++std::optional<brillo::SecureVector> LibFpDevice::GetPositiveMatchSecret(
 +      int index) {
-+  return base::nullopt;
++  VLOG(1) << __func__ << " index:" << index;
++  if (index == CrosFpDevice::kLastTemplate) {
++    auto opt_index = GetIndexOfLastTemplate();
++    if (!opt_index)
++      return std::nullopt;
++    index = *opt_index;
++  }
++  std::unique_ptr<VendorTemplate> templ = GetTemplateInternal(index);
++  if (!templ)
++    return std::nullopt;
++  VLOG(1) << __func__ << " get secret data.";
++  uint32_t sec_data = Crc32(templ->data(), templ->size());
++  brillo::SecureVector secret(sizeof sec_data);
++  std::memcpy(secret.data(), &sec_data, sizeof sec_data);
++  return secret;
 +}
 +
 +void LibFpDevice::SetMkbpEventCallback(MkbpCallback callback) {
@@ -336,7 +375,7 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +LibFpDevice::~LibFpDevice() {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  if (fp_device_ && mode_ != FpMode(FpMode::Mode::kNone)) {
 +    ResetFpDevice();
 +    if (cancellable_)
@@ -350,18 +389,18 @@ Index: biod/lib_fp_device.cc
 +  if (fp_context_)
 +    g_object_unref(fp_context_);
 +  g_libfpdev = NULL;
-+  LOG(INFO) << "LibFpDevice released.";
++  VLOG(1) << "LibFpDevice released.";
 +}
 +
-+base::Optional<CrosFpDeviceInterface::FpStats> LibFpDevice::GetFpStats() {
-+  return base::nullopt;
++std::optional<CrosFpDeviceInterface::FpStats> LibFpDevice::GetFpStats() {
++  return std::nullopt;
 +}
 +
 +bool LibFpDevice::InitEntropy(bool reset) {
 +  return true;
 +}
 +
-+base::Optional<std::string> LibFpDevice::ReadVersion() {
++std::optional<std::string> LibFpDevice::ReadVersion() {
 +  return std::string("1.0");
 +}
 +
@@ -374,7 +413,7 @@ Index: biod/lib_fp_device.cc
 +  FpDeviceFeature features = fp_device_get_features(fp_device_);
 +  has_feature_identify_ = fp_device_has_feature(fp_device_, FP_DEVICE_FEATURE_IDENTIFY);
 +  has_feature_storage_ = fp_device_has_feature(fp_device_, FP_DEVICE_FEATURE_STORAGE);
-+  LOG(INFO) << "LibFpDevice:" << fp_device_get_name(fp_device_) <<" feature:" << std::endl
++  VLOG(1) << "LibFpDevice:" << fp_device_get_name(fp_device_) <<" feature:" << std::endl
 +     << "identity:" << has_feature_identify_ << std::endl
 +     << "storage:" << has_feature_storage_ << std::endl
 +     << "others:" << std::hex << (int) features;
@@ -394,7 +433,7 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +FpMode LibFpDevice::GetFpMode() {
-+  LOG(INFO) << __func__ << mode_;
++  VLOG(1) << __func__ << mode_;
 +  return mode_;
 +}
 +
@@ -426,7 +465,7 @@ Index: biod/lib_fp_device.cc
 +  void *user_data, GError *error) {
 +  LibFpDevice *lfd = CAST_TO_LFD(user_data);
 +  uint32_t result = EC_MKBP_FP_ENROLL;
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  if (error) {
 +    LOG(WARNING) << "Enroll stage " << completed_stages << " of " << fp_device_get_nr_enroll_stages(device)
 +      << " failed with error:" << error->message << " code:" << error->code;
@@ -440,7 +479,7 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +void LibFpDevice::StartEnroll() {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  GError *error = NULL;
 +  FpPrint *fp_print = NULL;
 +  FpPrint *temp_fp = fp_print_new(fp_device_);
@@ -451,10 +490,10 @@ Index: biod/lib_fp_device.cc
 +  fp_print = fp_device_enroll_sync(fp_device_, temp_fp, cancellable_,
 +                                   (FpEnrollProgress) OnEnrollProgress, this, &error);
 +  if (fp_print) {
-+    LOG(INFO) << "add new fingerprint at:" << std::hex << fp_print;
++    VLOG(1) << "add new fingerprint at:" << std::hex << fp_print;
 +    result |= EC_MKBP_FP_ERR_ENROLL_OK;
 +    if (fprints_->len >= MaxTemplateCount()) {
-+      LOG(INFO) << "new fingerprint will replace the last old one";
++      VLOG(1) << "new fingerprint will replace the last old one";
 +      auto old_fp = g_ptr_array_remove_index(fprints_, fprints_->len -1);
 +      g_object_unref(old_fp);
 +    }
@@ -477,7 +516,7 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +void LibFpDevice::StartVerify() {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  GError *error = NULL;
 +  FpPrint *verify_print = (FpPrint *) g_ptr_array_index(fprints_, 0);
 +  if (!fp_device_verify_sync(fp_device_, verify_print, cancellable_,
@@ -494,7 +533,7 @@ Index: biod/lib_fp_device.cc
 +
 +void LibFpDevice::OnMatchCb(FpDevice *dev, FpPrint *match, FpPrint *print,
 +    void *user_data, GError *error) {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  LibFpDevice *lfd = CAST_TO_LFD(user_data);
 +  uint32_t result = EC_MKBP_FP_MATCH;
 +  if (error) {
@@ -503,9 +542,9 @@ Index: biod/lib_fp_device.cc
 +  } else {
 +    if (match) {
 +      uint32_t index;
-+      LOG(INFO) << "Match is true";
++      VLOG(1) << "Match is true";
 +      if (g_ptr_array_find_with_equal_func(lfd->fprints_, match, (GEqualFunc) fp_print_equal, &index)) {
-+        LOG(INFO) << "Match index:" << index;
++        VLOG(1) << "Match index:" << index;
 +        result |= GetMatchIDX(index);
 +        /*
 +        if (print) {
@@ -531,14 +570,14 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +void LibFpDevice::ReportResult(uint32_t result) {
-+  LOG(INFO) << __func__ << " result:" << result;
++  VLOG(1) << __func__ << " result:" << result;
 +  if ( write(write_fd_.get(), &result, sizeof result) < 0) {
 +    LOG(ERROR) << "Failed to write result to pipe";
 +  }
 +}
 +
 +void LibFpDevice::StartIdentify() {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  GError *error = NULL;
 +  if (!fp_device_identify_sync(fp_device_, fprints_, cancellable_,
 +                               (FpMatchCb) OnMatchCb, this,
@@ -553,19 +592,19 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +void LibFpDevice::OnFingerStateChanged(FpDevice *dev, void *user_data) {
-+  LOG(INFO) << "Event: " << __func__;
++  VLOG(1) << "Event: " << __func__;
 +  int fg = static_cast<int>(fp_device_get_finger_status(dev));
 +  if (g_libfpdev->mode_ == FpMode(FpMode::Mode::kFingerUp) ||
 +      g_libfpdev->mode_ == FpMode(FpMode::Mode::kEnrollSessionFingerUp)) {
 +    switch(fg) {
 +      case 0:
 +      case 1:
-+        LOG(INFO) << "finger up";
++        VLOG(1) << "finger up";
 +        g_libfpdev->ReportResult(EC_MKBP_FP_FINGER_UP);
 +        break;
 +      case 2:
 +      case 3:
-+        LOG(INFO) << "finger down";
++        VLOG(1) << "finger down";
 +        break;
 +      default:
 +        break;
@@ -574,12 +613,12 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +void LibFpDevice::SetReadFpState() {
-+  LOG(INFO) << __func__ << std::hex << this;
++  VLOG(1) << __func__ << std::hex << this;
 +  g_signal_connect(G_OBJECT(fp_device_), "notify::finger-status", G_CALLBACK(OnFingerStateChanged), this);
 +}
 +
 +bool LibFpDevice::SetFpMode(const FpMode& mode) {
-+  LOG(INFO) << "Set mode:" << mode;
++  VLOG(1) << "Set mode:" << mode;
 +  switch (mode.EnumVal()) {
 +    case static_cast<int>(FpMode::Mode::kResetSensor):
 +      return ResetFpDevice();
@@ -589,7 +628,7 @@ Index: biod/lib_fp_device.cc
 +        return true;
 +      }
 +      if (EC_MKBP_FP_ENROLL_PROGRESS(last_result_) > 0) {
-+        LOG(INFO) << "continue enroll:" << EC_MKBP_FP_ENROLL_PROGRESS(last_result_);
++        VLOG(1) << "continue enroll:" << EC_MKBP_FP_ENROLL_PROGRESS(last_result_);
 +        return true;
 +      }
 +      if (thread_.joinable())
@@ -611,10 +650,10 @@ Index: biod/lib_fp_device.cc
 +        return false;
 +      }
 +      if (thread_.joinable()) {
-+        LOG(INFO) << "Reset fp.";
++        VLOG(1) << "Reset fp.";
 +        ResetFpDevice();
 +      }
-+      LOG(INFO) << "Create new domatch thread.";
++      VLOG(1) << "Create new domatch thread.";
 +      if (has_feature_identify_ && fprints_->len > 1)
 +        thread_ = std::thread(&LibFpDevice::StartIdentify, this);
 +      else
@@ -631,12 +670,28 @@ Index: biod/lib_fp_device.cc
 +  };
 +}
 +
-+base::Optional<std::bitset<32>> LibFpDevice::GetDirtyMap() {
++std::optional<std::bitset<32>> LibFpDevice::GetDirtyMap() {
 +  return dirty_;
 +}
 +
++bool LibFpDevice::RemoveTemplate(const VendorTemplate& tmpl) {
++  VLOG(1) << __func__;
++	auto* metadata =
++      reinterpret_cast<const ec_fp_template_encryption_metadata_ext*>(tmpl.data());
++  auto* fprint_data =
++      reinterpret_cast<const guchar*>(tmpl.data());
++  fprint_data += sizeof(ec_fp_template_encryption_metadata_ext);
++  g_autoptr(GError) error = NULL;
++  FpPrint *print = fp_print_deserialize(fprint_data, metadata->template_size, &error);
++  if (error) {
++		LOG(ERROR) << "Error deserializing data:" << error->message;
++		return false;
++  }
++  return fp_device_delete_print_sync(fp_device_, print, NULL, NULL);
++}
++
 +bool LibFpDevice::UploadTemplate(const VendorTemplate& tmpl) {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  if (fprints_->len >= MaxTemplateCount()) {
 +    biod_metrics_->SendUploadTemplateResult(EC_RES_OVERFLOW);
 +    return false;
@@ -659,7 +714,7 @@ Index: biod/lib_fp_device.cc
 +}
 +
 +std::unique_ptr<VendorTemplate> LibFpDevice::GetTemplate(int index) {
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  if (index == CrosFpDevice::kLastTemplate) {
 +    auto opt_index = GetIndexOfLastTemplate();
 +    if (!opt_index)
@@ -668,16 +723,22 @@ Index: biod/lib_fp_device.cc
 +    if (!dirty_.test(index))
 +      return nullptr;
 +  }
++  dirty_.set(index, false);
++  return GetTemplateInternal(index);
++}
++
++std::unique_ptr<VendorTemplate> LibFpDevice::GetTemplateInternal(int index) {
++  VLOG(1) << __func__;
 +  struct ec_fp_template_encryption_metadata_ext metadata = {
 +    .meta = {.struct_version = LIB_FP_TEMPLATE_FORMAT_VERSION}
 +    };
-+  LOG(INFO) << "get template index:" << index;
++  VLOG(1) << "get template index:" << index;
 +  FpPrint *print = (FpPrint *)g_ptr_array_index(fprints_, index);
 +  if (!print) {
 +    LOG(ERROR) << "no fingerprint found at " << index;
 +    return nullptr;
 +  } else {
-+    LOG(INFO) << "got fingerprint at:" << std::hex << print;
++    VLOG(1) << "got fingerprint at:" << std::hex << print;
 +  }
 +  GError *error = NULL;
 +  g_autofree guchar *data = NULL;
@@ -690,7 +751,7 @@ Index: biod/lib_fp_device.cc
 +    }
 +    return nullptr;
 +  }
-+  LOG(INFO) << "copy to Vendor template data size:" << metadata.template_size
++  VLOG(1) << "copy to Vendor template data size:" << metadata.template_size
 +    << " address:" << std::hex << data ;
 +  size_t total_size = sizeof metadata + metadata.template_size;
 +  std::unique_ptr<VendorTemplate> tmpl(new VendorTemplate(total_size));
@@ -699,21 +760,20 @@ Index: biod/lib_fp_device.cc
 +  auto* pos = tmpl->data();
 +  std::memcpy(pos, meta_array, sizeof metadata);
 +  std::memcpy(pos + sizeof metadata, data, metadata.template_size);
-+  LOG(INFO) << "return tmpl size:" << tmpl->size() << " address:" << tmpl->data();
-+  dirty_.set(index, false);
++  VLOG(1) << "return tmpl size:" << tmpl->size() << " address:" << tmpl->data();
 +  return tmpl;
 +}
 +
-+base::Optional<int> LibFpDevice::GetIndexOfLastTemplate() {
++std::optional<int> LibFpDevice::GetIndexOfLastTemplate() {
 +  if (fprints_->len >= MaxTemplateCount() || fprints_->len < 1) {
 +    LOG(ERROR) << "Invalid index of last template: " << fprints_->len << ".";
-+    return base::nullopt;
++    return std::nullopt;
 +  }
 +  return fprints_->len - 1;
 +};
 +
 +bool LibFpDevice::SetContext(std::string user_hex) {
-+  LOG(INFO) << __func__ << " " << user_hex;
++  VLOG(1) << __func__ << " " << user_hex;
 +  bool success = true;
 +  FpMode original_mode = mode_;
 +  if (mode_ == FpMode(FpMode::Mode::kModeInvalid)) {
@@ -721,7 +781,7 @@ Index: biod/lib_fp_device.cc
 +    success = false;
 +  }
 +	if (original_mode == FpMode(FpMode::Mode::kMatch)) {
-+    LOG(INFO) << "Attempting to set context with match mode.";
++    VLOG(1) << "Attempting to set context with match mode.";
 +    success = ResetFpDevice();
 +  } else if (original_mode != FpMode(FpMode::Mode::kNone)) {
 +    LOG(ERROR) << "Attempting to set context with mode: " << original_mode;
@@ -734,6 +794,8 @@ Index: biod/lib_fp_device.cc
 +  }
 +  biod_metrics_->SendSetContextSuccess(success);
 +  user_hex_ = user_hex;
++  if (fprints_->len > 0)
++    g_ptr_array_remove_range(fprints_, 0, fprints_->len);
 +  return success;
 +}
 +
@@ -742,14 +804,12 @@ Index: biod/lib_fp_device.cc
 +    LOG(ERROR) << "Attempting to reset context with mode: " << mode_;
 +  CHECK(biod_metrics_);
 +  biod_metrics_->SendResetContextMode(mode_);
-+  if (fprints_->len > 0)
-+    g_ptr_array_remove_range(fprints_, 0, fprints_->len);
 +  return SetContext(std::string());
 +}
 +
 +bool LibFpDevice::OpenFpDevice() {
 +  GError *error;
-+  LOG(INFO) << __func__;
++  VLOG(1) << __func__;
 +  if (!fp_device_open_sync(fp_device_, NULL, &error)) {
 +    LOG(ERROR) << "Failed to open fingerprinter " << fp_device_get_name(fp_device_);
 +    g_clear_error (&error);
@@ -760,7 +820,7 @@ Index: biod/lib_fp_device.cc
 +  SetReadFpState();
 +  ResetContext();
 +  g_libfpdev = this;
-+  LOG(INFO) << "libfprint device opened";
++  VLOG(1) << "libfprint device opened";
 +  return true;
 +}
 +
@@ -773,7 +833,7 @@ Index: biod/lib_fp_device.cc
 +    else
 +      LOG(ERROR) << "No print found, but the storage is full.";
 +    if (fp_device_clear_storage_sync(fp_device_, NULL, NULL)) {
-+      LOG(INFO) << "Clean storage of fingerprint device";
++      VLOG(1) << "Clean storage of fingerprint device";
 +    } else {
 +      LOG(ERROR) << "Failed to Clean storage of fintgerprint device";
 +    }
@@ -818,7 +878,7 @@ Index: biod/lib_fp_device.cc
 +  }
 +  fp_device_ = (FpDevice *)g_ptr_array_index(devices, 0);
 +  fprints_ = g_ptr_array_new_with_free_func(g_object_unref);
-+  LOG(INFO) << "Got device " << fp_device_get_driver(fp_device_) << ":" <<
++  VLOG(1) << "Got device " << fp_device_get_driver(fp_device_) << ":" <<
 +      fp_device_get_device_id(fp_device_) << " name:" << fp_device_get_name(fp_device_);
 +  g_ptr_array_free(devices, !OpenFpDevice());
 +  cancellable_ = g_cancellable_new();
@@ -827,7 +887,7 @@ Index: biod/lib_fp_device.cc
 +                                        base::Unretained(this)));
 +  self_pid_ = pthread_self();
 +
-+  LOG(INFO) << "After thread open. base thread:" << std::hex << self_pid_;
++  VLOG(1) << "After thread open. base thread:" << std::hex << self_pid_;
 +
 +  return true;
 +}
@@ -855,43 +915,85 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -17,6 +17,9 @@
+@@ -16,7 +16,9 @@
+ #include <base/values.h>
+ #include <dbus/bus.h>
  #include <base/timer/timer.h>
- 
- #include "biod/biod_storage.h"
+-
 +#if defined(LIB_FPRINT)
 +#include "biod/lib_fp_device.h"
 +#endif
  #include "biod/cros_fp_device.h"
+ #include "biod/cros_fp_record_manager.h"
  #include "biod/power_button_filter_interface.h"
- 
 Index: biod/cros_fp_biometrics_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.cc
 +++ biod/cros_fp_biometrics_manager.cc
-@@ -508,12 +508,13 @@ void CrosFpBiometricsManager::DoEnrollIm
+@@ -220,10 +220,18 @@ bool CrosFpBiometricsManager::RemoveReco
  
-   records_.emplace_back(record);
-   Record current_record(weak_factory_.GetWeakPtr(), records_.size() - 1);
-+  LOG(INFO)  << "write record tmpl size:" << tmpl->size() << " address:" << std::hex << tmpl->data();
-   if (!WriteRecord(current_record, tmpl->data(), tmpl->size())) {
-     records_.pop_back();
-     OnSessionFailed();
-     return;
+   std::string user_id = record->user_id;
+ 
++  const auto tmpl_record = record_manager_->GetSingleRecord(user_id, record_id);
++  if (tmpl_record) {
++    std::string tmpl_data_str;
++    base::Base64Decode(tmpl_record->data, &tmpl_data_str);
++    VendorTemplate tmpl(tmpl_data_str.begin(), tmpl_data_str.end());
++    if(!cros_dev_->RemoveTemplate(tmpl))
++      LOG(ERROR) << "Failed to remove user_id:" << user_id << " finger record:"
++        << record_id << " from finger printer";
++  }
+   // TODO(b/115399954): only delete record if user_id is primary user.
+   if (!record_manager_->DeleteRecord(record_id))
+     return false;
+-
+   // We cannot remove only one record if we want to stay in sync with the MCU,
+   // Clear and reload everything.
+   return ReloadAllRecords(user_id);
+Index: biod/cros_fp_record_manager.cc
+===================================================================
+--- biod.orig/cros_fp_record_manager.cc
++++ biod/cros_fp_record_manager.cc
+@@ -30,6 +30,8 @@ std::optional<RecordMetadata> CrosFpReco
+   return entry->second.metadata;
+ }
+ 
++
++
+ void CrosFpRecordManager::MakeRecordsWithoutValidationValInvalid(
+     std::vector<Record>* records) {
+   for (auto& record : *records) {
+@@ -42,6 +44,11 @@ void CrosFpRecordManager::MakeRecordsWit
    }
--
-+  LOG(INFO) << "record write done.";
-   BiometricsManager::EnrollStatus enroll_status = {true, 100};
-   OnEnrollScanDone(ScanResult::SCAN_RESULT_SUCCESS, enroll_status);
  }
-@@ -761,8 +762,9 @@ bool CrosFpBiometricsManager::WriteRecor
-                                           size_t tmpl_size) {
-   base::StringPiece tmpl_sp(reinterpret_cast<char*>(tmpl_data), tmpl_size);
-   std::string tmpl_base64;
-+  LOG(INFO) << __func__ << " begin encode";
-   base::Base64Encode(tmpl_sp, &tmpl_base64);
--
-+  LOG(INFO) << __func__ << "end encode";
-   return biod_storage_->WriteRecord(record,
-                                     base::Value(std::move(tmpl_base64)));
- }
+ 
++std::optional<Record> CrosFpRecordManager::GetSingleRecord(
++    const std::string& user_id, const std::string& record_id) {
++  return biod_storage_->ReadSingleRecord(user_id, record_id);
++}
++
+ std::vector<Record> CrosFpRecordManager::GetRecordsForUser(
+     const std::string& user_id) {
+   std::vector<Record> result = biod_storage_->ReadRecordsForSingleUser(user_id);
+Index: biod/cros_fp_record_manager.h
+===================================================================
+--- biod.orig/cros_fp_record_manager.h
++++ biod/cros_fp_record_manager.h
+@@ -27,6 +27,8 @@ class CrosFpRecordManagerInterface {
+   virtual void SetAllowAccess(bool allow) = 0;
+   virtual std::optional<RecordMetadata> GetRecordMetadata(
+       const std::string& record_id) = 0;
++  virtual std::optional<Record> GetSingleRecord(
++      const std::string& user_id, const std::string& record_id) = 0;
+   virtual std::vector<Record> GetRecordsForUser(const std::string& user_id) = 0;
+   virtual bool UserHasInvalidRecords(const std::string& user_id) = 0;
+   virtual bool CreateRecord(const RecordMetadata& record,
+@@ -54,6 +56,8 @@ class CrosFpRecordManager : public CrosF
+   std::optional<RecordMetadata> GetRecordMetadata(
+       const std::string& record_id) override;
+   std::vector<Record> GetRecordsForUser(const std::string& user_id) override;
++  std::optional<Record> GetSingleRecord(
++    const std::string& user_id, const std::string& record_id) override;
+   bool UserHasInvalidRecords(const std::string& user_id) override;
+   bool CreateRecord(const RecordMetadata& record,
+                     std::unique_ptr<VendorTemplate> templ) override;
