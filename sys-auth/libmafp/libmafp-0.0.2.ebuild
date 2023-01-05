@@ -8,10 +8,12 @@ inherit toolchain-funcs
 DESCRIPTION="empty project"
 HOMEPAGE="http://fydeos.com"
 
-LICENSE="BSD-Google"
+LICENSE="BSD-Fyde"
 SLOT="0"
 KEYWORDS="arm arm64"
 IUSE="test-utils"
+
+RESTRICT="arm? ( binchecks )"
 
 RDEPEND=""
 
