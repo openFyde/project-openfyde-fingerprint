@@ -27,8 +27,8 @@ IUSE="
 	fpmcu_firmware_nami
 	fpmcu_firmware_nocturne
 	fuzzer
-  libfprint
-  mafp
+	libfprint
+	mafp
 "
 
 COMMON_DEPEND="
@@ -78,7 +78,7 @@ pkg_setup() {
 }
 
 src_install() {
-	platform_install
+	platform_src_install
 
 	udev_dorules udev/99-biod.rules
 
@@ -105,6 +105,13 @@ PATCHES=(
   )
 
 src_prepare() {
-  default
-  use mafp && eapply ${FILESDIR}/patches/003-add-mafp.patch
+	default
+	use mafp && eapply ${FILESDIR}/patches/003-add-mafp.patch
+
+	# TODO: Remove patch 004, 005 once the 001, 002, 003 patches ard fixed to work with the new r108 biod upstream code
+	eapply -p2 ${FILESDIR}/patches/004-fix-r108-compile-errors.patch
+	pushd "$WORKDIR/$P" > /dev/null || die
+	# without the patch, platform_src_install will fail
+	eapply ${FILESDIR}/patches/005-fix-platform2-script-r108.patch
+	popd > /dev/null || die
 }
