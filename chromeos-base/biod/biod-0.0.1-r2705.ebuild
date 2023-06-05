@@ -1,9 +1,9 @@
-# Copyright 2016 The Chromium OS Authors. All rights reserved.
+# Copyright 2016 The ChromiumOS Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
-CROS_WORKON_COMMIT="473eeaa9bfc2a4cf8c4e941f6008d7e6eae1981e"
-CROS_WORKON_TREE=("2345346c6533c29d4e3ee84bc2bf53306247256c" "03c245e8a7503c58d08260388aa2efdb1e78bb11" "29d2f0fcd2444371bf2152eb9ffc9904ade26fea" "34fa0ea2975f272c5ba242aae3871139ec790782" "55976c0a11bc37a530f8d4c14ae732300e17ccd9" "e7dba8c91c1f3257c34d4a7ffff0ea2537aeb6bb")
+CROS_WORKON_COMMIT="20c2e1fedbb2153f8fdcd56303a8f0f955285cd3"
+CROS_WORKON_TREE=("c5a3f846afdfb5f37be5520c63a756807a6b31c4" "456773cac7369c71f9eea19c08ec6c8908b5b9da" "5fc655a864e89f331445ad76c757c117f451092b" "5b75188213f24484dc9fae5df56f8c6e5563c509" "71b6668ea23fdcf5ce2c3889e3a3cc703e8cd6df" "f91b6afd5f2ae04ee9a2c19109a3a4a36f7659e6")
 CROS_WORKON_USE_VCSID="1"
 CROS_WORKON_LOCALNAME="platform2"
 CROS_WORKON_PROJECT="chromiumos/platform2"
@@ -12,7 +12,8 @@ CROS_WORKON_SUBTREE="common-mk biod chromeos-config libec metrics .gn"
 
 PLATFORM_SUBDIR="biod"
 
-inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform udev user
+inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform \
+	tmpfiles udev user
 
 DESCRIPTION="Biometrics Daemon for Chromium OS"
 HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/biod/README.md"
@@ -27,14 +28,15 @@ IUSE="
 	fpmcu_firmware_nami
 	fpmcu_firmware_nocturne
 	fuzzer
-	libfprint
-	mafp
+  libfprint
+  mafp
 "
 
 COMMON_DEPEND="
 	chromeos-base/chromeos-config-tools:=
 	chromeos-base/libec:=
 	>=chromeos-base/metrics-0.0.1-r3152:=
+	chromeos-base/vboot_reference:=
 	sys-apps/flashmap:=
 "
 
@@ -75,12 +77,15 @@ DEPEND="
 pkg_setup() {
 	enewuser biod
 	enewgroup biod
+	enewgroup fpdev
 }
 
 src_install() {
 	platform_src_install
 
 	udev_dorules udev/99-biod.rules
+
+	dotmpfiles tmpfiles.d/*.conf
 
 	# Set up cryptohome daemon mount store in daemon's mount
 	# namespace.
@@ -102,16 +107,5 @@ platform_pkg_test() {
 PATCHES=(
   ${FILESDIR}/patches/001-add-libfprint.patch
   ${FILESDIR}/patches/002-update-biod-conf.patch
-  )
-
-src_prepare() {
-	default
-	use mafp && eapply ${FILESDIR}/patches/003-add-mafp.patch
-
-	# TODO: Remove patch 004, 005 once the 001, 002, 003 patches ard fixed to work with the new r108 biod upstream code
-	eapply -p2 ${FILESDIR}/patches/004-fix-r108-compile-errors.patch
-	pushd "$WORKDIR/$P" > /dev/null || die
-	# without the patch, platform_src_install will fail
-	eapply ${FILESDIR}/patches/005-fix-platform2-script-r108.patch
-	popd > /dev/null || die
-}
+  ${FILESDIR}/patches/003-add-mafp.patch
+)

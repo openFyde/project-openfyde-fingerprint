@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium OS Authors. All rights reserved.
+# Copyright 2016 The ChromiumOS Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
@@ -10,7 +10,8 @@ CROS_WORKON_SUBTREE="common-mk biod chromeos-config libec metrics .gn"
 
 PLATFORM_SUBDIR="biod"
 
-inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform udev user
+inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform \
+	tmpfiles udev user
 
 DESCRIPTION="Biometrics Daemon for Chromium OS"
 HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/biod/README.md"
@@ -33,6 +34,7 @@ COMMON_DEPEND="
 	chromeos-base/chromeos-config-tools:=
 	chromeos-base/libec:=
 	>=chromeos-base/metrics-0.0.1-r3152:=
+	chromeos-base/vboot_reference:=
 	sys-apps/flashmap:=
 "
 
@@ -73,12 +75,15 @@ DEPEND="
 pkg_setup() {
 	enewuser biod
 	enewgroup biod
+	enewgroup fpdev
 }
 
 src_install() {
-	platform_install
+	platform_src_install
 
 	udev_dorules udev/99-biod.rules
+
+	dotmpfiles tmpfiles.d/*.conf
 
 	# Set up cryptohome daemon mount store in daemon's mount
 	# namespace.

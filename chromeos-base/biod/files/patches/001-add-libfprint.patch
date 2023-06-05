@@ -27,8 +27,8 @@ Index: biod/BUILD.gn
  }
  
  static_library("libbiod") {
-@@ -67,6 +75,7 @@ static_library("libbiod") {
-     "biometrics_daemon.cc",
+@@ -68,6 +76,7 @@ static_library("libbiod") {
+     "biometrics_manager_wrapper.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
 +    "lib_fp_device.cc",
@@ -39,18 +39,34 @@ Index: biod/cros_fp_device.h
 ===================================================================
 --- biod.orig/cros_fp_device.h
 +++ biod/cros_fp_device.h
-@@ -51,6 +51,10 @@ class CrosFpDevice : public CrosFpDevice
-   // CrosFpDeviceInterface overrides:
+@@ -17,13 +17,13 @@
+ #include <libec/ec_command_factory.h>
+ #include <libec/fingerprint/fp_info_command.h>
+ #include <libec/fingerprint/fp_mode.h>
+-
++#include "biod/cros_fp_device_interface_ext.h"
+ #include "biod/biod_metrics.h"
+ #include "biod/uinput_device.h"
+ 
+ namespace biod {
+ 
+-class CrosFpDevice : public ec::CrosFpDeviceInterface {
++class CrosFpDevice : public ec::CrosFpDeviceInterfaceExt {
+  public:
+   static std::unique_ptr<CrosFpDevice> Create(
+       BiodMetricsInterface* biod_metrics,
+@@ -51,6 +51,10 @@ class CrosFpDevice : public ec::CrosFpDe
+   // ec::CrosFpDeviceInterface overrides:
    ~CrosFpDevice() override;
  
-+  CrosFpDeviceInterface::CrosFpType GetDeviceType() override {
-+    return CrosFpDeviceInterface::CrosFpType::CROS_FP;
++  ec::CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
++    return ec::CrosFpDeviceInterfaceExt::CrosFpType::CROS_FP;
 +  }
 +
    bool SetFpMode(const ec::FpMode& mode) override;
    ec::FpMode GetFpMode() override;
    std::optional<FpStats> GetFpStats() override;
-@@ -60,6 +64,9 @@ class CrosFpDevice : public CrosFpDevice
+@@ -60,6 +64,9 @@ class CrosFpDevice : public ec::CrosFpDe
        int index) override;
    std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
    bool UploadTemplate(const VendorTemplate& tmpl) override;
@@ -59,32 +75,6 @@ Index: biod/cros_fp_device.h
 +  }
    bool SetContext(std::string user_id) override;
    bool ResetContext() override;
-   // Initialise the entropy in the SBP. If |reset| is true, the old entropy
-Index: biod/cros_fp_device_interface.h
-===================================================================
---- biod.orig/cros_fp_device_interface.h
-+++ biod/cros_fp_device_interface.h
-@@ -40,6 +40,13 @@ class CrosFpDeviceInterface {
-     ec_image current_image = EC_IMAGE_UNKNOWN;
-   };
- 
-+  enum class CrosFpType:int {
-+    CROS_FP,
-+    LIB_FP
-+  };
-+
-+  virtual CrosFpType GetDeviceType() = 0;
-+
-   virtual void SetMkbpEventCallback(MkbpCallback callback) = 0;
- 
-   struct FpStats {
-@@ -60,6 +67,7 @@ class CrosFpDeviceInterface {
-       int index) = 0;
-   virtual std::unique_ptr<VendorTemplate> GetTemplate(int index) = 0;
-   virtual bool UploadTemplate(const VendorTemplate& tmpl) = 0;
-+  virtual bool RemoveTemplate(const VendorTemplate& tmpl) = 0;
-   virtual bool SetContext(std::string user_id) = 0;
-   virtual bool ResetContext() = 0;
    // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 Index: biod/lib_fp_device.h
 ===================================================================
@@ -113,7 +103,7 @@ Index: biod/lib_fp_device.h
 +#include <pthread.h>
 +
 +#include "biod/biod_metrics.h"
-+#include "biod/cros_fp_device_interface.h"
++#include "biod/cros_fp_device_interface_ext.h"
 +
 +extern "C" {
 +#include <fprint.h>
@@ -122,7 +112,7 @@ Index: biod/lib_fp_device.h
 +
 +namespace biod {
 +
-+class LibFpDevice : public CrosFpDeviceInterface {
++class LibFpDevice : public ec::CrosFpDeviceInterfaceExt {
 + public:
 +  static std::unique_ptr<LibFpDevice> Create(
 +      BiodMetricsInterface* biod_metrics,
@@ -142,7 +132,7 @@ Index: biod/lib_fp_device.h
 +  // Run a simple command to get the version information from FP MCU and check
 +  // whether the image type returned is the same as |expected_image|.
 +  static bool WaitOnEcBoot(const base::ScopedFD& cros_fp_fd,
-+                           ec_current_image expected_image);
++                           ec_image expected_image);
 +
 +  // Run a simple command to get the version information from FP MCU.
 +  static std::optional<EcVersion> GetVersion(const base::ScopedFD& cros_fp_fd);
@@ -150,8 +140,8 @@ Index: biod/lib_fp_device.h
 +  // CrosFpDeviceInterface overrides:
 +  ~LibFpDevice() override;
 +
-+  CrosFpDeviceInterface::CrosFpType GetDeviceType() override {
-+    return CrosFpDeviceInterface::CrosFpType::LIB_FP;
++  ec::CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
++    return ec::CrosFpDeviceInterface::CrosFpTypeExt::LIB_FP;
 +  }
 +  bool SetFpMode(const ec::FpMode& mode) override;
 +  ec::FpMode GetFpMode() override;
@@ -188,7 +178,7 @@ Index: biod/lib_fp_device.h
 +
 +  bool Init();
 +
-+  base::Optional<std::string> ReadVersion();
++  std::optional<std::string> ReadVersion();
 +
 + private:
 +  // Get block id from rollback info.
@@ -199,7 +189,7 @@ Index: biod/lib_fp_device.h
 +  static void OnFingerStateChanged(FpDevice *dev, void *user_data);
 +  static void OnActionCompleted(FpDevice *dev, void *user_data);
 +
-+  base::Optional<int> GetIndexOfLastTemplate();
++  std::optional<int> GetIndexOfLastTemplate();
 +
 +  bool ResetFpDevice();
 +
@@ -392,7 +382,7 @@ Index: biod/lib_fp_device.cc
 +  VLOG(1) << "LibFpDevice released.";
 +}
 +
-+std::optional<CrosFpDeviceInterface::FpStats> LibFpDevice::GetFpStats() {
++std::optional<ec::CrosFpDeviceInterface::FpStats> LibFpDevice::GetFpStats() {
 +  return std::nullopt;
 +}
 +
@@ -897,16 +887,16 @@ Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -428,8 +428,13 @@ BiometricsDaemon::BiometricsDaemon() {
+@@ -37,8 +37,13 @@ BiometricsDaemon::BiometricsDaemon() {
        "%s/%s", kBiodServicePath, kCrosFpBiometricsManagerName));
  
-   auto biod_metrics = std::make_unique<BiodMetrics>();
+   biod_metrics_ = std::make_unique<BiodMetrics>();
 +#if defined(LIB_FPRINT)
 +  auto cros_fp_device = LibFpDevice::Create(
-+    biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
++       biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
 +#else
    auto cros_fp_device = CrosFpDevice::Create(
-       biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
+       biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
 +#endif
    CHECK(cros_fp_device) << "Failed to initialize CrosFpDevice.";
    auto power_button_filter = PowerButtonFilter::Create(bus_);
@@ -926,11 +916,29 @@ Index: biod/cros_fp_biometrics_manager.h
  #include "biod/cros_fp_device.h"
  #include "biod/cros_fp_record_manager.h"
  #include "biod/power_button_filter_interface.h"
+@@ -29,7 +31,7 @@ class CrosFpBiometricsManager : public B
+  public:
+   CrosFpBiometricsManager(
+       std::unique_ptr<PowerButtonFilterInterface> power_button_filter,
+-      std::unique_ptr<ec::CrosFpDeviceInterface> cros_fp_device,
++      std::unique_ptr<ec::CrosFpDeviceInterfaceExt> cros_fp_device,
+       BiodMetricsInterface* biod_metrics,
+       std::unique_ptr<CrosFpRecordManagerInterface> record_manager);
+   CrosFpBiometricsManager(const CrosFpBiometricsManager&) = delete;
+@@ -156,7 +158,7 @@ class CrosFpBiometricsManager : public B
+   bool RemoveRecord(const std::string& id);
+ 
+   BiodMetricsInterface* biod_metrics_ = nullptr;  // Not owned.
+-  std::unique_ptr<ec::CrosFpDeviceInterface> cros_dev_;
++  std::unique_ptr<ec::CrosFpDeviceInterfaceExt> cros_dev_;
+ 
+   SessionAction next_session_action_;
+ 
 Index: biod/cros_fp_biometrics_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.cc
 +++ biod/cros_fp_biometrics_manager.cc
-@@ -220,10 +220,18 @@ bool CrosFpBiometricsManager::RemoveReco
+@@ -253,10 +253,18 @@ bool CrosFpBiometricsManager::RemoveReco
  
    std::string user_id = record->user_id;
  
@@ -950,6 +958,15 @@ Index: biod/cros_fp_biometrics_manager.cc
    // We cannot remove only one record if we want to stay in sync with the MCU,
    // Clear and reload everything.
    return ReloadAllRecords(user_id);
+@@ -370,7 +378,7 @@ void CrosFpBiometricsManager::KillMcuSes
+ 
+ CrosFpBiometricsManager::CrosFpBiometricsManager(
+     std::unique_ptr<PowerButtonFilterInterface> power_button_filter,
+-    std::unique_ptr<ec::CrosFpDeviceInterface> cros_fp_device,
++    std::unique_ptr<ec::CrosFpDeviceInterfaceExt> cros_fp_device,
+     BiodMetricsInterface* biod_metrics,
+     std::unique_ptr<CrosFpRecordManagerInterface> record_manager)
+     : biod_metrics_(biod_metrics),
 Index: biod/cros_fp_record_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_record_manager.cc
@@ -979,7 +996,7 @@ Index: biod/cros_fp_record_manager.h
 ===================================================================
 --- biod.orig/cros_fp_record_manager.h
 +++ biod/cros_fp_record_manager.h
-@@ -27,6 +27,8 @@ class CrosFpRecordManagerInterface {
+@@ -28,6 +28,8 @@ class CrosFpRecordManagerInterface {
    virtual void SetAllowAccess(bool allow) = 0;
    virtual std::optional<RecordMetadata> GetRecordMetadata(
        const std::string& record_id) = 0;
@@ -988,7 +1005,7 @@ Index: biod/cros_fp_record_manager.h
    virtual std::vector<Record> GetRecordsForUser(const std::string& user_id) = 0;
    virtual bool UserHasInvalidRecords(const std::string& user_id) = 0;
    virtual bool CreateRecord(const RecordMetadata& record,
-@@ -54,6 +56,8 @@ class CrosFpRecordManager : public CrosF
+@@ -55,6 +57,8 @@ class CrosFpRecordManager : public CrosF
    std::optional<RecordMetadata> GetRecordMetadata(
        const std::string& record_id) override;
    std::vector<Record> GetRecordsForUser(const std::string& user_id) override;
@@ -997,3 +1014,34 @@ Index: biod/cros_fp_record_manager.h
    bool UserHasInvalidRecords(const std::string& user_id) override;
    bool CreateRecord(const RecordMetadata& record,
                      std::unique_ptr<VendorTemplate> templ) override;
+Index: biod/cros_fp_device_interface_ext.h
+===================================================================
+--- /dev/null
++++ biod/cros_fp_device_interface_ext.h
+@@ -0,0 +1,26 @@
++// Copyright 2023 The FydeOS Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++// Author: Yang Tsao<yang@fydeos.io>
++
++#ifndef BIOD_CROS_FP_DEVICE_INTERFACE_EXT_H_
++#define BIOD_CROS_FP_DEVICE_INTERFACE_EXT_H_
++
++#include <libec/fingerprint/cros_fp_device_interface.h>
++using VendorTemplate = std::vector<uint8_t>;
++namespace ec {
++class CrosFpDeviceInterfaceExt : public CrosFpDeviceInterface {
++public:
++  enum class CrosFpType:int {
++    CROS_FP,
++    LIB_FP
++  };
++
++  virtual CrosFpType GetDeviceType() = 0;
++  virtual bool RemoveTemplate(const VendorTemplate& tmpl) = 0;
++  FpSensorErrors GetHwErrors() override {
++    return FpSensorErrors::kNone;
++  }
++};
++}
++#endif // BIOD_CROS_FP_DEVICE_INTERFACE_EXT_H_

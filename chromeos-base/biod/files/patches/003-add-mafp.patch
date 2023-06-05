@@ -21,7 +21,6 @@ Index: biod/fyde_mafp_device.cc
 +#include <base/callback_helpers.h>
 +#include <base/check.h>
 +#include <base/logging.h>
-+#include <base/optional.h>
 +#include <base/strings/string_number_conversions.h>
 +#include <base/strings/stringprintf.h>
 +#include <chromeos/ec/ec_commands.h>
@@ -31,6 +30,7 @@ Index: biod/fyde_mafp_device.cc
 +
 +using ec::FpMode;
 +using ec::EcCmdVersionSupportStatus;
++using ec::FpSensorErrors;
 +
 +#define MAX_TEMPLATE_COUNT 5
 +#define TEMPLATE_FORMAT_VERSION 0x1
@@ -154,7 +154,7 @@ Index: biod/fyde_mafp_device.cc
 +		g_mafp_device = NULL;
 +  }
 +
-+  std::optional<CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
++  std::optional<ec::CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
 +    return std::nullopt;
 +  }
 +
@@ -444,7 +444,7 @@ Index: biod/fyde_mafp_device.cc
 +    return true;
 +  }
 +
-+  base::Optional<int> MafpDevice::GetIndexOfLastTemplate() {
++  std::optional<int> MafpDevice::GetIndexOfLastTemplate() {
 +    if (templates_.size() < 1)
 +      return std::nullopt;
 +    return templates_.size() - 1;
@@ -517,7 +517,7 @@ Index: biod/fyde_mafp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/fyde_mafp_device.h
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,140 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -541,7 +541,7 @@ Index: biod/fyde_mafp_device.h
 +#include <pthread.h>
 +
 +#include "biod/biod_metrics.h"
-+#include "biod/cros_fp_device_interface.h"
++#include "biod/cros_fp_device_interface_ext.h"
 +
 +extern "C" {
 +#include <mafp_interfaces.h>
@@ -549,7 +549,7 @@ Index: biod/fyde_mafp_device.h
 +
 +namespace biod {
 +
-+class MafpDevice : public CrosFpDeviceInterface {
++class MafpDevice : public ec::CrosFpDeviceInterfaceExt {
 + public:
 +  static std::unique_ptr<MafpDevice> Create(
 +      BiodMetricsInterface* biod_metrics,
@@ -569,7 +569,7 @@ Index: biod/fyde_mafp_device.h
 +  // Run a simple command to get the version information from FP MCU and check
 +  // whether the image type returned is the same as |expected_image|.
 +  static bool WaitOnEcBoot(const base::ScopedFD& cros_fp_fd,
-+                           ec_current_image expected_image);
++                           ec_image expected_image);
 +
 +  // Run a simple command to get the version information from FP MCU.
 +  static std::optional<EcVersion> GetVersion(const base::ScopedFD& cros_fp_fd);
@@ -577,8 +577,8 @@ Index: biod/fyde_mafp_device.h
 +  // CrosFpDeviceInterface overrides:
 +  ~MafpDevice() override;
 +
-+  CrosFpDeviceInterface::CrosFpType GetDeviceType() override {
-+    return CrosFpDeviceInterface::CrosFpType::LIB_FP;
++  ec::CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
++    return ec::CrosFpDeviceInterfaceExt::CrosFpType::LIB_FP;
 +  }
 +  bool SetFpMode(const ec::FpMode& mode) override;
 +  ec::FpMode GetFpMode() override;
@@ -604,7 +604,6 @@ Index: biod/fyde_mafp_device.h
 +
 +  ec::EcCmdVersionSupportStatus EcCmdVersionSupported(uint16_t cmd,
 +                                                      uint32_t ver) override;
-+
 + protected:
 +  MafpDevice(
 +      BiodMetricsInterface* biod_metrics,
@@ -615,7 +614,7 @@ Index: biod/fyde_mafp_device.h
 +
 +  bool Init();
 +
-+  base::Optional<std::string> ReadVersion();
++  std::optional<std::string> ReadVersion();
 +
 + private:
 +  // Get block id from rollback info.
@@ -628,7 +627,7 @@ Index: biod/fyde_mafp_device.h
 +  void RemoveOneShouldRemovedTemplate();
 +
 +  static void OnHalNotify(const fingerprint_msg_t *msg);
-+  base::Optional<int> GetIndexOfLastTemplate();
++  std::optional<int> GetIndexOfLastTemplate();
 +
 +  bool ResetFpDevice();
 +
@@ -676,16 +675,16 @@ Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -431,6 +431,9 @@ BiometricsDaemon::BiometricsDaemon() {
+@@ -40,6 +40,9 @@ BiometricsDaemon::BiometricsDaemon() {
  #if defined(LIB_FPRINT)
    auto cros_fp_device = LibFpDevice::Create(
-     biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
+        biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
 +#elif defined(MAFP)
 +  auto cros_fp_device = MafpDevice::Create(
-+    biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
++      biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
  #else
    auto cros_fp_device = CrosFpDevice::Create(
-       biod_metrics.get(), std::make_unique<ec::EcCommandFactory>());
+       biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
 Index: biod/BUILD.gn
 ===================================================================
 --- biod.orig/BUILD.gn
@@ -709,15 +708,15 @@ Index: biod/BUILD.gn
    }
  }
  
-@@ -75,7 +80,6 @@ static_library("libbiod") {
-     "biometrics_daemon.cc",
+@@ -76,7 +81,6 @@ static_library("libbiod") {
+     "biometrics_manager_wrapper.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
 -    "lib_fp_device.cc",
      "cros_fp_firmware.cc",
      "cros_fp_record_manager.cc",
      "crypto_init/bio_crypto_init.cc",
-@@ -86,6 +90,11 @@ static_library("libbiod") {
+@@ -88,6 +92,11 @@ static_library("libbiod") {
      "updater/update_utils.cc",
      "utils.cc",
    ]
