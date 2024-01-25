@@ -3,13 +3,15 @@ ones come very close to the default time-out threshold of 30 seconds.
 Increase the relevant threshold to 45 seconds to make those tests less
 sensitive to CPU frequency, system load etc.
 
---- a/tests/meson.build
-+++ b/tests/meson.build
-@@ -88,6 +88,7 @@
+Index: libfprint-v1.94.6/tests/meson.build
+===================================================================
+--- libfprint-v1.94.6.orig/tests/meson.build
++++ libfprint-v1.94.6/tests/meson.build
+@@ -110,6 +110,7 @@ if get_option('introspection')
                      suite: ut_suite,
                      depends: libfprint_typelib,
                      env: envs,
 +                    timeout: 45,
                  )
              endforeach
-         else
+ 

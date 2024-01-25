@@ -37,7 +37,7 @@ Index: biod/init/biod.conf
  end script
  
  # Here (in order) are a list of the args added:
-@@ -59,31 +62,6 @@ end script
+@@ -59,32 +62,7 @@ end script
  # - Execute the daemon.
  # - Add the log dir.
  # - Pipe output to biod.out.
@@ -58,11 +58,11 @@ Index: biod/init/biod.conf
 -  -k 'tmpfs,/var,tmpfs,MS_NODEV|MS_NOEXEC|MS_NOSUID,mode=755,size=10M'       \
 -  -b ${LOG_DIR},,1                                                           \
 -  -b /var/lib/metrics,,1                                                     \
+-  -b /var/lib/biod,,1                                                        \
 -  -b ${FP_DEV}                                                               \
 -  -b /dev/uinput                                                             \
 -  -b /sys                                                                    \
-+exec runuser                                                                 \
-   -u biod -g biod                                                            \
+-  -u biod -g biod                                                            \
 -  -G                                                                         \
 -  -c 0                                                                       \
 -  -n                                                                         \
@@ -70,4 +70,7 @@ Index: biod/init/biod.conf
 -  -- /usr/bin/biod                                                           \
 -  --log_dir=${LOG_DIR}                                                       \
 -  >/var/log/biod.out 2>&1
-+  -- sh -c "G_MESSAGES_DEBUG=${G_MESSAGES_DEBUG} LIBUSB_DEBUG=${LIBUSB_DEBUG} MAFP_DEBUG=${MAFP_DEBUG} /usr/bin/biod --log_dir=${LOG_DIR}" >/var/log/biod.out 2>&1
++exec runuser \
++  -u biod -g biod \
++  -- sh -c "G_MESSAGES_DEBUG=${G_MESSAGES_DEBUG} LIBUSB_DEBUG=${LIBUSB_DEBUG} MAFP_DEBUG=${MAFP_DEBUG} /usr/bin/biod --log_dir=${LOG_DIR}" \
++  > /var/log/biod.out 2>&1

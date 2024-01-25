@@ -7,7 +7,8 @@ inherit meson udev
 
 DESCRIPTION="Library to add support for consumer fingerprint readers"
 HOMEPAGE="https://cgit.freedesktop.org/libfprint/libfprint/ https://github.com/freedesktop/libfprint https://gitlab.freedesktop.org/libfprint/libfprint"
-SRC_URI="https://github.com/freedesktop/libfprint/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz"
+#SRC_URI="https://github.com/freedesktop/libfprint/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz"
+SRC_URI="https://gitlab.freedesktop.org/libfprint/libfprint/-/archive/v${PV}/libfprint-v${PV}.tar.gz -> ${P}.tar.gz"
 
 LICENSE="LGPL-2.1+"
 SLOT="2"
@@ -42,9 +43,10 @@ BDEPEND="
 
 PATCHES=(
 	"${FILESDIR}"/${PN}-1.94.1-test-timeout.patch
-	"${FILESDIR}"/${PN}-1.94.4-stderr-redefinition.patch
   "${FILESDIR}"/001-add-fprint-info.patch
 )
+
+S="${S%/*}/libfprint-v${PV}"
 
 
 create-cross-file() {
@@ -71,9 +73,10 @@ src_install() {
   meson_src_install
   udev_dorules ${FILESDIR}/70-libfprint-2.rules
   exeinto /usr/bin
-  doexe ${S}-build/libfprint/fprint-list-supported-devices
+  build="${S%/*}/${P}-build"
+  doexe ${build}/libfprint/fprint-list-supported-devices
   if use test-utils; then
     exeinto /usr/bin
-    doexe ${S}-build/examples/{cpp-test,enroll,identify,img-capture,manage-prints,verify}
+    doexe ${build}/examples/{cpp-test,enroll,identify,img-capture,manage-prints,verify}
   fi
 }

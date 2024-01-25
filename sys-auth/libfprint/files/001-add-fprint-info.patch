@@ -1,7 +1,7 @@
-Index: libfprint/data/autosuspend.hwdb
+Index: libfprint-v1.94.6/data/autosuspend.hwdb
 ===================================================================
---- libfprint.orig/data/autosuspend.hwdb
-+++ libfprint/data/autosuspend.hwdb
+--- libfprint-v1.94.6.orig/data/autosuspend.hwdb
++++ libfprint-v1.94.6/data/autosuspend.hwdb
 @@ -5,6 +5,7 @@
  usb:v08FFp1600*
   ID_AUTOSUSPEND=1
@@ -45,7 +45,7 @@ Index: libfprint/data/autosuspend.hwdb
 + ID_MISC_FINGERPRINT=1
  
  # Supported by libfprint driver aes4000
- usb:v5501p08FF*
+ usb:v08FFp5501*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
 + ID_MISC_FINGERPRINT=1
@@ -67,8 +67,8 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver elanmoc
  usb:v04F3p0C7D*
-@@ -151,11 +160,13 @@ usb:v04F3p0C8C*
- usb:v04F3p0C8D*
+@@ -152,11 +161,13 @@ usb:v04F3p0C8D*
+ usb:v04F3p0C99*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
 + ID_MISC_FINGERPRINT=1
@@ -79,9 +79,9 @@ Index: libfprint/data/autosuspend.hwdb
   ID_PERSIST=0
 + ID_MISC_FINGERPRINT=1
  
- # Supported by libfprint driver goodixmoc
- usb:v27C6p5840*
-@@ -177,11 +188,13 @@ usb:v27C6p659C*
+ # Supported by libfprint driver fpcmoc
+ usb:v10A5pFFE0*
+@@ -195,11 +206,13 @@ usb:v27C6p659C*
  usb:v27C6p6A94*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -95,7 +95,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver synaptics
  usb:v06CBp00BD*
-@@ -200,6 +213,7 @@ usb:v06CBp015F*
+@@ -218,6 +231,7 @@ usb:v06CBp015F*
  usb:v06CBp0104*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -103,7 +103,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver upeksonly
  usb:v147Ep2016*
-@@ -207,17 +221,20 @@ usb:v147Ep1000*
+@@ -225,6 +239,7 @@ usb:v147Ep1000*
  usb:v147Ep1001*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -111,6 +111,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver upektc
  usb:v0483p2015*
+@@ -232,11 +247,13 @@ usb:v0483p2017*
  usb:v147Ep3001*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -124,7 +125,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver uru4000
  usb:v045Ep00BC*
-@@ -228,27 +245,32 @@ usb:v05BAp0008*
+@@ -247,27 +264,32 @@ usb:v05BAp0008*
  usb:v05BAp000A*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -157,7 +158,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Supported by libfprint driver vfs5011
  usb:v138Ap0010*
-@@ -258,11 +280,13 @@ usb:v138Ap0017*
+@@ -277,11 +299,13 @@ usb:v138Ap0017*
  usb:v138Ap0018*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
@@ -171,7 +172,7 @@ Index: libfprint/data/autosuspend.hwdb
  
  # Known unsupported devices
  usb:v04E8p730B*
-@@ -353,3 +377,8 @@ usb:v298Dp2033*
+@@ -382,3 +406,8 @@ usb:v298Dp2033*
  usb:v3538p0930*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0

@@ -17,8 +17,8 @@ Index: biod/fyde_mafp_device.cc
 +
 +#include <algorithm>
 +
-+#include <base/bind.h>
-+#include <base/callback_helpers.h>
++#include <base/functional/bind.h>
++#include <base/functional/callback_helpers.h>
 +#include <base/check.h>
 +#include <base/logging.h>
 +#include <base/strings/string_number_conversions.h>
@@ -517,7 +517,7 @@ Index: biod/fyde_mafp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/fyde_mafp_device.h
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,159 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -587,16 +587,35 @@ Index: biod/fyde_mafp_device.h
 +  bool SupportsPositiveMatchSecret() override;
 +  std::optional<brillo::SecureVector> GetPositiveMatchSecret(
 +      int index) override;
++	std::optional<GetSecretReply> GetPositiveMatchSecretWithPubkey(
++      int index,
++      const brillo::Blob& pk_in_x,
++      const brillo::Blob& pk_in_y) override { return std::nullopt; }
 +  std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
 +  bool UploadTemplate(const VendorTemplate& tmpl) override;
 +  bool RemoveTemplate(const VendorTemplate& tmpl) override;
++  bool PreloadTemplate(size_t idx, const VendorTemplate& tmpl) override { return false;}
++  bool ReloadTemplates(size_t num) override { return false; }
 +  bool SetContext(std::string user_id) override;
++	bool SetNonceContext(const brillo::Blob& nonce,
++                       const brillo::Blob& encrypted_user_id,
++                       const brillo::Blob& iv) override { return false; }
++  std::optional<brillo::Blob> GetNonce() override { return std::nullopt; }
 +  bool ResetContext() override;
 +  // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 +  // will be deleted. If |reset| is false, we will only add entropy, and only
 +  // if no entropy had been added before.
 +  bool InitEntropy(bool reset) override;
 +  bool UpdateFpInfo() override;
++
++  std::optional<PairingKeyKeygenReply> PairingKeyKeygen() override { return std::nullopt;}
++  std::optional<brillo::Blob> PairingKeyWrap(
++      const brillo::Blob& pub_x,
++      const brillo::Blob& pub_y,
++      const brillo::Blob& encrypted_priv) override { return std::nullopt;}
++  bool LoadPairingKey(const brillo::Blob& encrypted_pairing_key) override {return false;}
++
++  ec::FpSensorErrors GetHwErrors() override { return ec::FpSensorErrors::kNone;}
 +
 +  int MaxTemplateCount() override;
 +  int TemplateVersion() override;
@@ -662,20 +681,20 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -18,6 +18,8 @@
- #include <base/timer/timer.h>
+@@ -22,6 +22,8 @@
+ #include "biod/power_button_filter_interface.h"
  #if defined(LIB_FPRINT)
  #include "biod/lib_fp_device.h"
 +#elif defined(MAFP)
 +#include "biod/fyde_mafp_device.h"
  #endif
- #include "biod/cros_fp_device.h"
- #include "biod/cros_fp_record_manager.h"
+ 
+ namespace biod {
 Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -40,6 +40,9 @@ BiometricsDaemon::BiometricsDaemon() {
+@@ -51,6 +51,9 @@ BiometricsDaemon::BiometricsDaemon() {
  #if defined(LIB_FPRINT)
    auto cros_fp_device = LibFpDevice::Create(
         biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
@@ -689,18 +708,18 @@ Index: biod/BUILD.gn
 ===================================================================
 --- biod.orig/BUILD.gn
 +++ biod/BUILD.gn
-@@ -56,12 +56,17 @@ pkg_config("target_defaults") {
+@@ -57,12 +57,17 @@ pkg_config("target_defaults") {
    } else {
      pkg_deps += [ "protobuf-lite" ]
    }
 -  if (use.libfprint) {
-+  if (!use.mafp) {
++  if (defined(use.libfprint)) {
      pkg_deps += [
        "libfprint-2",
        "glib-2.0",
       ]
      defines += [ "LIB_FPRINT" ]
-+  } else {
++  } else if (defined(use.mafp)) {
 +    pkg_deps += [
 +      "libmafp",
 +    ]
@@ -708,23 +727,23 @@ Index: biod/BUILD.gn
    }
  }
  
-@@ -76,7 +81,6 @@ static_library("libbiod") {
-     "biometrics_manager_wrapper.cc",
+@@ -81,7 +86,6 @@ static_library("libbiod") {
+     "cros_fp_auth_stack_manager.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
 -    "lib_fp_device.cc",
      "cros_fp_firmware.cc",
      "cros_fp_record_manager.cc",
-     "crypto_init/bio_crypto_init.cc",
-@@ -88,6 +92,11 @@ static_library("libbiod") {
+     "cros_fp_session_manager_impl.cc",
+@@ -96,6 +100,11 @@ static_library("libbiod") {
      "updater/update_utils.cc",
      "utils.cc",
    ]
-+  if (use.mafp) {
++  if (defined(use.mafp)) {
 +    sources += [ "fyde_mafp_device.cc" ]
 +  } else {
 +    sources += [ "lib_fp_device.cc" ]
 +  }
    configs += [ ":target_defaults" ]
+   libs = [ "hwsec" ]
    pkg_deps = [ "vboot_host" ]
- }

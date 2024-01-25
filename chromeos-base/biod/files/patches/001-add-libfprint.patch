@@ -2,18 +2,7 @@ Index: biod/BUILD.gn
 ===================================================================
 --- biod.orig/BUILD.gn
 +++ biod/BUILD.gn
-@@ -30,8 +30,9 @@ group("all") {
- pkg_config("target_defaults") {
-   # TODO(crbug.com/993557): Remove |fp_on_power_button| USE flag when nocturne
-   # is EOL.
-+  defines = [ ]
-   if (use.fp_on_power_button) {
--    defines = [ "FP_ON_POWER_BUTTON" ]
-+    defines += [ "FP_ON_POWER_BUTTON" ]
-   }
- 
-   # NOSORT
-@@ -55,6 +56,13 @@ pkg_config("target_defaults") {
+@@ -57,6 +57,13 @@ pkg_config("target_defaults") {
    } else {
      pkg_deps += [ "protobuf-lite" ]
    }
@@ -27,14 +16,14 @@ Index: biod/BUILD.gn
  }
  
  static_library("libbiod") {
-@@ -68,6 +76,7 @@ static_library("libbiod") {
-     "biometrics_manager_wrapper.cc",
+@@ -74,6 +81,7 @@ static_library("libbiod") {
+     "cros_fp_auth_stack_manager.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
 +    "lib_fp_device.cc",
      "cros_fp_firmware.cc",
      "cros_fp_record_manager.cc",
-     "crypto_init/bio_crypto_init.cc",
+     "cros_fp_session_manager_impl.cc",
 Index: biod/cros_fp_device.h
 ===================================================================
 --- biod.orig/cros_fp_device.h
@@ -66,21 +55,19 @@ Index: biod/cros_fp_device.h
    bool SetFpMode(const ec::FpMode& mode) override;
    ec::FpMode GetFpMode() override;
    std::optional<FpStats> GetFpStats() override;
-@@ -60,6 +64,9 @@ class CrosFpDevice : public ec::CrosFpDe
-       int index) override;
+@@ -64,6 +68,7 @@ class CrosFpDevice : public ec::CrosFpDe
+       const brillo::Blob& pk_in_y) override;
    std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
    bool UploadTemplate(const VendorTemplate& tmpl) override;
-+  bool RemoveTemplate(const VendorTemplate& tmpl) override {
-+    return true;
-+  }
++  bool RemoveTemplate(const VendorTemplate& tmpl) override { return true; }
+   bool PreloadTemplate(size_t idx, const VendorTemplate& tmpl) override;
+   bool ReloadTemplates(size_t num) override;
    bool SetContext(std::string user_id) override;
-   bool ResetContext() override;
-   // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 Index: biod/lib_fp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.h
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,165 @@
 +// Copyright 2018 The Chromium OS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -141,7 +128,7 @@ Index: biod/lib_fp_device.h
 +  ~LibFpDevice() override;
 +
 +  ec::CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
-+    return ec::CrosFpDeviceInterface::CrosFpTypeExt::LIB_FP;
++    return ec::CrosFpDeviceInterfaceExt::CrosFpType::LIB_FP;
 +  }
 +  bool SetFpMode(const ec::FpMode& mode) override;
 +  ec::FpMode GetFpMode() override;
@@ -150,16 +137,35 @@ Index: biod/lib_fp_device.h
 +  bool SupportsPositiveMatchSecret() override;
 +  std::optional<brillo::SecureVector> GetPositiveMatchSecret(
 +      int index) override;
++  std::optional<GetSecretReply> GetPositiveMatchSecretWithPubkey(
++      int index,
++      const brillo::Blob& pk_in_x,
++      const brillo::Blob& pk_in_y) override { return std::nullopt; }
 +  std::unique_ptr<VendorTemplate> GetTemplate(int index) override;
 +  bool UploadTemplate(const VendorTemplate& tmpl) override;
 +  bool RemoveTemplate(const VendorTemplate& tmpl) override;
++  bool PreloadTemplate(size_t idx, const VendorTemplate& tmpl) override { return false;}
++  bool ReloadTemplates(size_t num) override { return false; }
 +  bool SetContext(std::string user_id) override;
++  bool SetNonceContext(const brillo::Blob& nonce,
++                       const brillo::Blob& encrypted_user_id,
++                       const brillo::Blob& iv) override { return false; }
++  std::optional<brillo::Blob> GetNonce() override { return std::nullopt; }
 +  bool ResetContext() override;
 +  // Initialise the entropy in the SBP. If |reset| is true, the old entropy
 +  // will be deleted. If |reset| is false, we will only add entropy, and only
 +  // if no entropy had been added before.
 +  bool InitEntropy(bool reset) override;
 +  bool UpdateFpInfo() override;
++
++  std::optional<PairingKeyKeygenReply> PairingKeyKeygen() override { return std::nullopt;}
++  std::optional<brillo::Blob> PairingKeyWrap(
++      const brillo::Blob& pub_x,
++      const brillo::Blob& pub_y,
++      const brillo::Blob& encrypted_priv) override { return std::nullopt;}
++  bool LoadPairingKey(const brillo::Blob& encrypted_pairing_key) override {return false;}
++
++  ec::FpSensorErrors GetHwErrors() override { return ec::FpSensorErrors::kNone;}
 +
 +  int MaxTemplateCount() override;
 +  int TemplateVersion() override;
@@ -231,7 +237,7 @@ Index: biod/lib_fp_device.cc
 ===================================================================
 --- /dev/null
 +++ biod/lib_fp_device.cc
-@@ -0,0 +1,651 @@
+@@ -0,0 +1,650 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -244,11 +250,10 @@ Index: biod/lib_fp_device.cc
 +
 +#include <algorithm>
 +
-+#include <base/bind.h>
-+#include <base/callback_helpers.h>
++#include <base/functional/bind.h>
++#include <base/functional/callback_helpers.h>
 +#include <base/check.h>
 +#include <base/logging.h>
-+#include <base/optional.h>
 +#include <base/strings/string_number_conversions.h>
 +#include <base/strings/stringprintf.h>
 +#include <chromeos/ec/ec_commands.h>
@@ -887,8 +892,8 @@ Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -37,8 +37,13 @@ BiometricsDaemon::BiometricsDaemon() {
-       "%s/%s", kBiodServicePath, kCrosFpBiometricsManagerName));
+@@ -48,8 +48,13 @@ BiometricsDaemon::BiometricsDaemon() {
+       sequencer->GetHandler("Manager.RegisterAsync() failed.", true));
  
    biod_metrics_ = std::make_unique<BiodMetrics>();
 +#if defined(LIB_FPRINT)
@@ -905,18 +910,17 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -16,7 +16,9 @@
- #include <base/values.h>
- #include <dbus/bus.h>
- #include <base/timer/timer.h>
--
+@@ -20,6 +20,9 @@
+ #include "biod/cros_fp_record_manager.h"
+ #include "biod/maintenance_scheduler.h"
+ #include "biod/power_button_filter_interface.h"
 +#if defined(LIB_FPRINT)
 +#include "biod/lib_fp_device.h"
 +#endif
- #include "biod/cros_fp_device.h"
- #include "biod/cros_fp_record_manager.h"
- #include "biod/power_button_filter_interface.h"
-@@ -29,7 +31,7 @@ class CrosFpBiometricsManager : public B
+ 
+ namespace biod {
+ 
+@@ -29,7 +32,7 @@ class CrosFpBiometricsManager : public B
   public:
    CrosFpBiometricsManager(
        std::unique_ptr<PowerButtonFilterInterface> power_button_filter,
@@ -925,8 +929,8 @@ Index: biod/cros_fp_biometrics_manager.h
        BiodMetricsInterface* biod_metrics,
        std::unique_ptr<CrosFpRecordManagerInterface> record_manager);
    CrosFpBiometricsManager(const CrosFpBiometricsManager&) = delete;
-@@ -156,7 +158,7 @@ class CrosFpBiometricsManager : public B
-   bool RemoveRecord(const std::string& id);
+@@ -135,7 +138,7 @@ class CrosFpBiometricsManager : public B
+   void OnTaskComplete();
  
    BiodMetricsInterface* biod_metrics_ = nullptr;  // Not owned.
 -  std::unique_ptr<ec::CrosFpDeviceInterface> cros_dev_;
@@ -938,7 +942,7 @@ Index: biod/cros_fp_biometrics_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.cc
 +++ biod/cros_fp_biometrics_manager.cc
-@@ -253,10 +253,18 @@ bool CrosFpBiometricsManager::RemoveReco
+@@ -160,10 +160,18 @@ bool CrosFpBiometricsManager::RemoveReco
  
    std::string user_id = record->user_id;
  
@@ -958,7 +962,7 @@ Index: biod/cros_fp_biometrics_manager.cc
    // We cannot remove only one record if we want to stay in sync with the MCU,
    // Clear and reload everything.
    return ReloadAllRecords(user_id);
-@@ -370,7 +378,7 @@ void CrosFpBiometricsManager::KillMcuSes
+@@ -267,7 +275,7 @@ void CrosFpBiometricsManager::KillMcuSes
  
  CrosFpBiometricsManager::CrosFpBiometricsManager(
      std::unique_ptr<PowerButtonFilterInterface> power_button_filter,
@@ -966,12 +970,12 @@ Index: biod/cros_fp_biometrics_manager.cc
 +    std::unique_ptr<ec::CrosFpDeviceInterfaceExt> cros_fp_device,
      BiodMetricsInterface* biod_metrics,
      std::unique_ptr<CrosFpRecordManagerInterface> record_manager)
-     : biod_metrics_(biod_metrics),
+     : session_weak_factory_(this),
 Index: biod/cros_fp_record_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_record_manager.cc
 +++ biod/cros_fp_record_manager.cc
-@@ -30,6 +30,8 @@ std::optional<RecordMetadata> CrosFpReco
+@@ -34,6 +34,8 @@ std::optional<RecordMetadata> CrosFpReco
    return entry->second.metadata;
  }
  
@@ -980,7 +984,7 @@ Index: biod/cros_fp_record_manager.cc
  void CrosFpRecordManager::MakeRecordsWithoutValidationValInvalid(
      std::vector<Record>* records) {
    for (auto& record : *records) {
-@@ -42,6 +44,11 @@ void CrosFpRecordManager::MakeRecordsWit
+@@ -46,6 +48,11 @@ void CrosFpRecordManager::MakeRecordsWit
    }
  }
  
@@ -1005,7 +1009,7 @@ Index: biod/cros_fp_record_manager.h
    virtual std::vector<Record> GetRecordsForUser(const std::string& user_id) = 0;
    virtual bool UserHasInvalidRecords(const std::string& user_id) = 0;
    virtual bool CreateRecord(const RecordMetadata& record,
-@@ -55,6 +57,8 @@ class CrosFpRecordManager : public CrosF
+@@ -61,6 +63,8 @@ class CrosFpRecordManager : public CrosF
    std::optional<RecordMetadata> GetRecordMetadata(
        const std::string& record_id) override;
    std::vector<Record> GetRecordsForUser(const std::string& user_id) override;
