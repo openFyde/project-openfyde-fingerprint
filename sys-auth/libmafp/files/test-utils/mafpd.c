@@ -4,10 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include "mafp_interfaces.h"
 
-#define MAFP_FINGERPRINT_HARDWARE_MODULE_ID  "microarray.fingerprint"
 #define DEFAULT_ACTIVE_GROUP  0
 #define DEFAULT_STORAGE_DIR  "/var/tmp"
 
@@ -34,7 +34,7 @@ fp_action_type_t getActionType(char* s)
     return -1;
 }
 
-void onAcquire(fingerprint_acquired_t *data)
+void onAcquire(const fingerprint_acquired_t *data)
 {
     switch(data->acquired_info) {
         case FINGERPRINT_ACQUIRED_GOOD:
@@ -66,9 +66,9 @@ void onAcquire(fingerprint_acquired_t *data)
     }
 }
 
-void onEnroll(fingerprint_enroll_t *data)
+void onEnroll(const fingerprint_enroll_t *data)
 {
-    fingerprint_finger_id_t *finger = &data->finger;
+    const fingerprint_finger_id_t *finger = &data->finger;
     uint32_t remaining = data->samples_remaining;
     printf("onEnroll: gid %d, fid %d, remain %d\n", finger->gid, finger->fid, remaining);
     if(remaining <= 0) {
@@ -78,16 +78,16 @@ void onEnroll(fingerprint_enroll_t *data)
     }
 }
 
-void onRemove(fingerprint_removed_t *data)
+void onRemove(const fingerprint_removed_t *data)
 {
-    fingerprint_finger_id_t *finger = &data->finger;
+    const fingerprint_finger_id_t *finger = &data->finger;
     printf("onRemove: gid %d, fid %d\n", finger->gid, finger->fid);
     process_finish = 1;
 }
 
-void onAuthenticate(fingerprint_authenticated_t *data)
+void onAuthenticate(const fingerprint_authenticated_t *data)
 {
-    fingerprint_finger_id_t *finger = &data->finger;
+    const fingerprint_finger_id_t *finger = &data->finger;
     printf("onAuthenticate: gid %d, fid %d\n", finger->gid, finger->fid);
     if(finger->fid) {
         printf("match successfully\n");
@@ -97,15 +97,15 @@ void onAuthenticate(fingerprint_authenticated_t *data)
     process_finish = 1;
 }
 
-void onEnumerate(fingerprint_enumerated_t *data)
+void onEnumerate(const fingerprint_enumerated_t *data)
 {
-    fingerprint_finger_id_t *finger = &data->finger;
+    const fingerprint_finger_id_t *finger = &data->finger;
     uint32_t remaining = data->remaining_templates;
     printf("onEnumerate: gid %d, fid %d\n", finger->gid, finger->fid);
     process_finish = 1;
 }
 
-void onError(fingerprint_error_t data)
+void onError(const fingerprint_error_t data)
 {
     switch(data) {
         case FINGERPRINT_ERROR_HW_UNAVAILABLE:
@@ -138,7 +138,7 @@ void onError(fingerprint_error_t data)
 }
 
 void fingerprint_hal_notify(const fingerprint_msg_t *msg) {
-    fingerprint_msg_type_t type = msg->type;
+    const fingerprint_msg_type_t type = msg->type;
     switch (type) {
         case FINGERPRINT_ERROR:
             printf("get message:ERROR\n");
@@ -170,10 +170,10 @@ void fingerprint_hal_notify(const fingerprint_msg_t *msg) {
 }
 
 void show_menu(int argc) {
-    puts("******************** help information *********************");
+  puts("******************** help information *********************");
 	puts("[version] show verison information about lib");
 	puts("[enroll] enroll finger process");
-    puts("[verify] verify finger");
+  puts("[verify] verify finger");
 	puts("[search] search finger");
 	puts("[delete] delete finger with fid");
 	puts("[enumerate] enumerate finger have been enrolled");
@@ -187,29 +187,29 @@ int32_t main(int argc, char *argv[])
     int64_t authenticator_id;
 
     puts("******************** Microarray Fingerprint Module Test Program *********************");
-    if(argc==1) {
+    if(argc != 2) {
         show_menu(argc);
         return 0;
     }
-
+    puts("open device");
     ret = fingerprint_open(MAFP_FINGERPRINT_HARDWARE_MODULE_ID, &mDevices);
     if(ret || !mDevices) {
         printf("open fingerprint devices failed\n");
         return -1;
     }
-
+    puts("set active group.");
     ret = mDevices->set_active_group(mDevices, DEFAULT_ACTIVE_GROUP, DEFAULT_STORAGE_DIR);
     if(ret) {
         printf("set active group failed\n");
         return -1;
     }
-
+    puts("set notify");
     ret = mDevices->set_notify(mDevices, fingerprint_hal_notify);
     if(ret) {
         printf("set notify callback function failed\n");
         return -1;
     }
-
+    printf("do action:%s\n", argv[1]);
     fp_action_type_t action = getActionType(argv[1]);
     hw_device_info_t *info = &mDevices->dev_info;
     hw_auth_token_t token = {0};
