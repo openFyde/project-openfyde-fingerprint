@@ -32,7 +32,7 @@ src_compile() {
     return
   fi
   tc-export AR CC NM OBJCOPY RANLIB
-  ext_flags="-L$(get_libdir) -lmafp -I${FILESDIR}/include"
+  ext_flags="-L${S_DIR} -lmafp -I${FILESDIR}/include"
   $CC $ext_flags $CFLAGS ${FILESDIR}/test-utils/mafpd.c -o $S/mafpd
 }
 
