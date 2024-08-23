@@ -11,7 +11,7 @@ CROS_WORKON_SUBTREE="common-mk biod chromeos-config libec libhwsec libhwsec-foun
 PLATFORM_SUBDIR="biod"
 
 inherit cros-fuzzer cros-sanitizers cros-workon cros-unibuild platform \
-	tmpfiles udev user
+	cros-protobuf tmpfiles udev user
 
 DESCRIPTION="Biometrics Daemon for Chromium OS"
 HOMEPAGE="https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/biod/README.md"
@@ -22,11 +22,13 @@ IUSE="
 	factory_branch
 	fp_on_power_button
 	fpmcu_firmware_bloonchipper
+	fpmcu_firmware_buccaneer
 	fpmcu_firmware_dartmonkey
 	fpmcu_firmware_helipilot
 	fpmcu_firmware_nami
 	fpmcu_firmware_nocturne
 	fuzzer
+	test
   libfprint
   mafp
 "
@@ -38,10 +40,8 @@ COMMON_DEPEND="
 	chromeos-base/libhwsec-foundation:=
 	>=chromeos-base/metrics-0.0.1-r3152:=
 	chromeos-base/vboot_reference:=
-	dev-libs/protobuf:=
 	sys-apps/flashmap:=
 	virtual/libusb:1=
-  libfprint? ( dev-libs/glib )
 "
 
 # For biod_client_tool. The biod_proxy library will be built on all boards but
@@ -63,13 +63,20 @@ RDEPEND="
 # See third_party/chromiumos-overlay/profiles/base/make.defaults.
 RDEPEND+="
 	!factory_branch? (
-		fpmcu_firmware_bloonchipper? ( sys-firmware/chromeos-fpmcu-release-bloonchipper )
+		fpmcu_firmware_bloonchipper? (
+			sys-firmware/chromeos-fpmcu-release-bloonchipper
+			sys-firmware/chromeos-zephyr-fpmcu-release-bloonchipper
+		)
+		fpmcu_firmware_buccaneer? ( sys-firmware/chromeos-fpmcu-release-buccaneer )
 		fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
 		fpmcu_firmware_helipilot? ( sys-firmware/chromeos-fpmcu-release-helipilot )
 		fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
 		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
 	)
-  libfprint? ( sys-auth/libfprint )
+  libfprint? (
+      dev-libs/glib
+      sys-auth/libfprint
+    )
   mafp? ( sys-auth/libmafp )
 "
 
@@ -109,8 +116,4 @@ src_install() {
 	platform_fuzzer_install "${S}/OWNERS" "${OUT}"/biod_storage_fuzzer --comp "${fuzzer_component_id}"
 
 	platform_fuzzer_install "${S}/OWNERS" "${OUT}"/biod_crypto_validation_value_fuzzer --comp "${fuzzer_component_id}"
-}
-
-platform_pkg_test() {
-	platform test_all
 }
