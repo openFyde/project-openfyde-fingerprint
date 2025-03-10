@@ -681,7 +681,7 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -22,6 +22,8 @@
+@@ -21,6 +21,8 @@
  #include "biod/power_button_filter_interface.h"
  #if defined(LIB_FPRINT)
  #include "biod/lib_fp_device.h"
@@ -694,7 +694,7 @@ Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -51,6 +51,9 @@ BiometricsDaemon::BiometricsDaemon() {
+@@ -61,6 +61,9 @@ BiometricsDaemon::BiometricsDaemon() {
  #if defined(LIB_FPRINT)
    auto cros_fp_device = LibFpDevice::Create(
         biod_metrics_.get(), std::make_unique<ec::EcCommandFactory>());
@@ -727,7 +727,7 @@ Index: biod/BUILD.gn
    }
  }
  
-@@ -81,7 +86,6 @@ static_library("libbiod") {
+@@ -82,7 +87,6 @@ static_library("libbiod") {
      "cros_fp_auth_stack_manager.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
@@ -735,7 +735,7 @@ Index: biod/BUILD.gn
      "cros_fp_firmware.cc",
      "cros_fp_record_manager.cc",
      "cros_fp_session_manager_impl.cc",
-@@ -96,6 +100,11 @@ static_library("libbiod") {
+@@ -98,6 +102,11 @@ static_library("libbiod") {
      "updater/update_utils.cc",
      "utils.cc",
    ]
@@ -746,4 +746,4 @@ Index: biod/BUILD.gn
 +  }
    configs += [ ":target_defaults" ]
    libs = [ "hwsec" ]
-   pkg_deps = [ "vboot_host" ]
+   pkg_deps = [

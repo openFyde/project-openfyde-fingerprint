@@ -5,7 +5,7 @@ Index: biod/init/biod.conf
 @@ -5,7 +5,7 @@
  description   "Start the Chromium OS biometrics daemon"
  author        "chromium-os-dev@chromium.org"
-
+ 
 -start on started system-services and stopped bio_crypto_init and uinput-added
 +start on started system-services
  stop on stopping system-services
@@ -13,7 +13,7 @@ Index: biod/init/biod.conf
  respawn limit 3 10  # if the job respawns 3 times in 10 seconds, stop trying.
 @@ -15,15 +15,18 @@ oom score -100
  expect fork
-
+ 
  env LOG_DIR=/var/log/biod
 -env FP_DEV=/dev/cros_fp
 +env G_MESSAGES_DEBUG=
@@ -21,7 +21,7 @@ Index: biod/init/biod.conf
 +env MAFP_DEBUG=0
 +env FPDEV=/dev/madev0
 +env FPDEV_STORE=/var/lib/mafp
-
+ 
  pre-start script
 -  # Check the existence of ${FP_DEV}.
 -  if [ ! -c "${FP_DEV}" ]; then
@@ -35,9 +35,9 @@ Index: biod/init/biod.conf
 +  chown biod:biod "${FPDEV_STORE}" # croslint: disable:
 +  chown biod:biod "${FPDEV}" # croslint: disable:
  end script
-
+ 
  # Here (in order) are a list of the args added:
-@@ -59,32 +62,9 @@ end script
+@@ -61,33 +64,9 @@ end script
  # - Execute the daemon.
  # - Add the log dir.
  # - Pipe output to biod.out.
@@ -59,6 +59,7 @@ Index: biod/init/biod.conf
 -  -b ${LOG_DIR},,1                                                           \
 -  -b /var/lib/metrics,,1                                                     \
 -  -b /var/lib/biod,,1                                                        \
+-  -b /var/lib/bio_fw_updater,,1                                              \
 -  -b ${FP_DEV}                                                               \
 -  -b /dev/uinput                                                             \
 -  -b /sys                                                                    \

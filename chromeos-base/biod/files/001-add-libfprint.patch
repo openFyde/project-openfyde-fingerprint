@@ -16,7 +16,7 @@ Index: biod/BUILD.gn
  }
  
  static_library("libbiod") {
-@@ -74,6 +81,7 @@ static_library("libbiod") {
+@@ -75,6 +82,7 @@ static_library("libbiod") {
      "cros_fp_auth_stack_manager.cc",
      "cros_fp_biometrics_manager.cc",
      "cros_fp_device.cc",
@@ -29,7 +29,7 @@ Index: biod/cros_fp_device.h
 --- biod.orig/cros_fp_device.h
 +++ biod/cros_fp_device.h
 @@ -17,13 +17,13 @@
- #include <libec/ec_command_factory.h>
+ #include <libec/fingerprint/cros_fp_device_interface.h>
  #include <libec/fingerprint/fp_info_command.h>
  #include <libec/fingerprint/fp_mode.h>
 -
@@ -892,8 +892,8 @@ Index: biod/biometrics_daemon.cc
 ===================================================================
 --- biod.orig/biometrics_daemon.cc
 +++ biod/biometrics_daemon.cc
-@@ -48,8 +48,13 @@ BiometricsDaemon::BiometricsDaemon() {
-       sequencer->GetHandler("Manager.RegisterAsync() failed.", true));
+@@ -58,8 +58,13 @@ BiometricsDaemon::BiometricsDaemon() {
+       << "Fingerprint board name unavailable.";
  
    biod_metrics_ = std::make_unique<BiodMetrics>();
 +#if defined(LIB_FPRINT)
@@ -910,7 +910,7 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -20,6 +20,9 @@
+@@ -19,6 +19,9 @@
  #include "biod/cros_fp_record_manager.h"
  #include "biod/maintenance_scheduler.h"
  #include "biod/power_button_filter_interface.h"
@@ -920,7 +920,7 @@ Index: biod/cros_fp_biometrics_manager.h
  
  namespace biod {
  
-@@ -29,7 +32,7 @@ class CrosFpBiometricsManager : public B
+@@ -28,7 +31,7 @@ class CrosFpBiometricsManager : public B
   public:
    CrosFpBiometricsManager(
        std::unique_ptr<PowerButtonFilterInterface> power_button_filter,
@@ -929,7 +929,7 @@ Index: biod/cros_fp_biometrics_manager.h
        BiodMetricsInterface* biod_metrics,
        std::unique_ptr<CrosFpRecordManagerInterface> record_manager);
    CrosFpBiometricsManager(const CrosFpBiometricsManager&) = delete;
-@@ -131,7 +134,7 @@ class CrosFpBiometricsManager : public B
+@@ -130,7 +133,7 @@ class CrosFpBiometricsManager : public B
    void OnTaskComplete();
  
    BiodMetricsInterface* biod_metrics_ = nullptr;  // Not owned.
@@ -942,7 +942,7 @@ Index: biod/cros_fp_biometrics_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.cc
 +++ biod/cros_fp_biometrics_manager.cc
-@@ -151,6 +151,15 @@ bool CrosFpBiometricsManager::RemoveReco
+@@ -150,6 +150,15 @@ bool CrosFpBiometricsManager::RemoveReco
  
    std::string user_id = record->user_id;
  
@@ -956,7 +956,7 @@ Index: biod/cros_fp_biometrics_manager.cc
 +        << record_id << " from finger printer";
 +  }
    // TODO(b/115399954): only delete record if user_id is primary user.
-   if (!record_manager_->DeleteRecord(record_id))
+   if (!record_manager_->DeleteRecord(record_id)) {
      return false;
 @@ -263,7 +272,7 @@ void CrosFpBiometricsManager::KillMcuSes
  
@@ -971,7 +971,7 @@ Index: biod/cros_fp_record_manager.cc
 ===================================================================
 --- biod.orig/cros_fp_record_manager.cc
 +++ biod/cros_fp_record_manager.cc
-@@ -34,6 +34,8 @@ std::optional<RecordMetadata> CrosFpReco
+@@ -36,6 +36,8 @@ std::optional<RecordMetadata> CrosFpReco
    return entry->second.metadata;
  }
  
@@ -980,7 +980,7 @@ Index: biod/cros_fp_record_manager.cc
  void CrosFpRecordManager::MakeRecordsWithoutValidationValInvalid(
      std::vector<Record>* records) {
    for (auto& record : *records) {
-@@ -46,6 +48,11 @@ void CrosFpRecordManager::MakeRecordsWit
+@@ -48,6 +50,11 @@ void CrosFpRecordManager::MakeRecordsWit
    }
  }
  
