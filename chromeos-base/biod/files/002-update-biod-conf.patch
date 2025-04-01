@@ -72,7 +72,7 @@ Index: biod/init/biod.conf
 -  --log_dir=${LOG_DIR}                                                       \
 -  >/var/log/biod.out 2>&1
 +exec sudo \
-+  -u biod -g biod \
++  -u biod -g biod -b \
 +  G_MESSAGES_DEBUG=${G_MESSAGES_DEBUG} LIBUSB_DEBUG=${LIBUSB_DEBUG} MAFP_DEBUG=${MAFP_DEBUG} \
 +  FPDEV=${FPDEV} FPDEV_STORE=${FPDEV_STORE} \
 +  /usr/bin/biod --log_dir=${LOG_DIR} \

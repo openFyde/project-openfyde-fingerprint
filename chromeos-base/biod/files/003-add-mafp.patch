@@ -2,7 +2,7 @@ Index: biod/fyde_mafp_device.cc
 ===================================================================
 --- /dev/null
 +++ biod/fyde_mafp_device.cc
-@@ -0,0 +1,510 @@
+@@ -0,0 +1,512 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -117,7 +117,7 @@ Index: biod/fyde_mafp_device.cc
 +} //namespace
 +
 +namespace biod {
-+	MafpDevice *g_mafp_device = NULL;
++	base::WeakPtr<MafpDevice> g_mafp_device;
 +
 +  bool MafpDevice::SupportsPositiveMatchSecret() {
 +    return true;
@@ -146,12 +146,14 @@ Index: biod/fyde_mafp_device.cc
 +  }
 +
 +  MafpDevice::~MafpDevice() {
-+    if (!mDevice_) {
++    if (mDevice_) {
 +      ResetFpDevice();
 +      mDevice_->close(mDevice_);
 +    }
++    watcher_.reset();
++
 +    mDevice_ = NULL;
-+		g_mafp_device = NULL;
++		g_mafp_device.reset();
 +  }
 +
 +  std::optional<ec::CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
@@ -230,7 +232,7 @@ Index: biod/fyde_mafp_device.cc
 +      mDevice_->close(mDevice_);
 +      return false;
 +    }
-+		g_mafp_device = this;
++		g_mafp_device = weak_ptr_factory_.GetWeakPtr();
 +    ret = mDevice_->set_notify(mDevice_, &MafpDevice::OnHalNotify);
 +    mode_ = FpMode(FpMode::Mode::kNone);
 +    watcher_ = base::FileDescriptorWatcher::WatchReadable(
@@ -368,7 +370,7 @@ Index: biod/fyde_mafp_device.cc
 +  }
 +
 +  void MafpDevice::OnHalNotify(const fingerprint_msg_t *msg) {
-+		if (!g_mafp_device)
++		if (!g_mafp_device.get())
 +			return;
 +    switch (msg->type) {
 +      case FINGERPRINT_ERROR:
@@ -517,7 +519,7 @@ Index: biod/fyde_mafp_device.h
 ===================================================================
 --- /dev/null
 +++ biod/fyde_mafp_device.h
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,160 @@
 +// Copyright 2022 The FydeOS Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -672,6 +674,7 @@ Index: biod/fyde_mafp_device.h
 +  std::unique_ptr<base::FileDescriptorWatcher::Controller> watcher_;
 +  base::ScopedFD read_fd_;
 +  base::ScopedFD write_fd_;
++  base::WeakPtrFactory<MafpDevice> weak_ptr_factory_{this};
 +};
 +
 +}  // namespace biod
