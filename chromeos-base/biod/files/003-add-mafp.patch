@@ -156,7 +156,7 @@ Index: biod/fyde_mafp_device.cc
 +		g_mafp_device.reset();
 +  }
 +
-+  std::optional<ec::CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
++  std::optional<CrosFpDeviceInterface::FpStats> MafpDevice::GetFpStats() {
 +    return std::nullopt;
 +  }
 +
@@ -551,7 +551,7 @@ Index: biod/fyde_mafp_device.h
 +
 +namespace biod {
 +
-+class MafpDevice : public ec::CrosFpDeviceInterfaceExt {
++class MafpDevice : public biod::CrosFpDeviceInterfaceExt {
 + public:
 +  static std::unique_ptr<MafpDevice> Create(
 +      BiodMetricsInterface* biod_metrics,
@@ -579,8 +579,8 @@ Index: biod/fyde_mafp_device.h
 +  // CrosFpDeviceInterface overrides:
 +  ~MafpDevice() override;
 +
-+  ec::CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
-+    return ec::CrosFpDeviceInterfaceExt::CrosFpType::LIB_FP;
++  CrosFpDeviceInterfaceExt::CrosFpType GetDeviceType() override {
++    return CrosFpDeviceInterfaceExt::CrosFpType::LIB_FP;
 +  }
 +  bool SetFpMode(const ec::FpMode& mode) override;
 +  ec::FpMode GetFpMode() override;
@@ -684,7 +684,7 @@ Index: biod/cros_fp_biometrics_manager.h
 ===================================================================
 --- biod.orig/cros_fp_biometrics_manager.h
 +++ biod/cros_fp_biometrics_manager.h
-@@ -21,6 +21,8 @@
+@@ -22,6 +22,8 @@
  #include "biod/power_button_filter_interface.h"
  #if defined(LIB_FPRINT)
  #include "biod/lib_fp_device.h"
