@@ -2,8 +2,8 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
-CROS_WORKON_COMMIT="012c5f372181575ff98e3585e6d2f58d7b06c734"
-CROS_WORKON_TREE=("bd6ab6972071770b6091936ff7fa113ada50ddc1" "06c88ca332c877b02722bc335a03fb84358650d3" "2e345d3eb2a5da874f6cfcbf8c37093f6665fe81" "1154e669245f88a53bb059302ba5d9802beb1021" "1ce1ce2cc97765c8449b674e92e258460d5d407e" "2c2bce16c896cfc1084d3744954a690970ef21d7" "cb008a5c4fa1fe93ce66a75df355308657d0917e" "272667aee0b44fda32f1d1f932d178147d01db5d" "f91b6afd5f2ae04ee9a2c19109a3a4a36f7659e6")
+CROS_WORKON_COMMIT="86656621c0ed9f92196ab93e176df6ee5c51c56f"
+CROS_WORKON_TREE=("80d4baed48e7c7c409c7ef85445449ee538906d7" "585ba4d7a418f3b666b104b27d683bbb6ba90d7e" "a2a00d640fbf4809c60065d23f775043ca22bc1e" "8a88fc27ad7194576005a9c85f3629996e4a15ad" "369a70bf72ea92298a6e2e8b7a500453e503a12f" "80939ad83b8001fb19198ab7e719925c124a4f6a" "fd1ab55bfbe3f597d446ba2bce050e54013f473a" "d308409644dd989573e0b6d181527438c5c76847" "f91b6afd5f2ae04ee9a2c19109a3a4a36f7659e6")
 CROS_WORKON_USE_VCSID="1"
 CROS_WORKON_LOCALNAME="platform2"
 CROS_WORKON_PROJECT="chromiumos/platform2"
@@ -26,13 +26,15 @@ IUSE="
 	fpmcu_firmware_bloonchipper
 	fpmcu_firmware_buccaneer
 	fpmcu_firmware_dartmonkey
+	fpmcu_firmware_gwendolin
 	fpmcu_firmware_helipilot
 	fpmcu_firmware_nami
 	fpmcu_firmware_nocturne
+	fpmcu_firmware_rosalia
 	fuzzer
 	test
-  libfprint
-  mafp
+	libfprint
+	mafp
 "
 # We must depend on libusb because libec headers make use of libusb.
 COMMON_DEPEND="
@@ -68,19 +70,26 @@ RDEPEND+="
 	!factory_branch? (
 		fpmcu_firmware_bloonchipper? (
 			sys-firmware/chromeos-fpmcu-release-bloonchipper
-			sys-firmware/chromeos-zephyr-fpmcu-release-bloonchipper
 		)
-		fpmcu_firmware_buccaneer? ( sys-firmware/chromeos-fpmcu-release-buccaneer )
+		fpmcu_firmware_buccaneer? (
+			sys-firmware/chromeos-fpmcu-release-buccaneer
+			sys-firmware/chromeos-zephyr-fpmcu-release-buccaneer
+		)
 		fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
-		fpmcu_firmware_helipilot? ( sys-firmware/chromeos-fpmcu-release-helipilot )
+		fpmcu_firmware_gwendolin? ( sys-firmware/chromeos-fpmcu-release-gwendolin )
+		fpmcu_firmware_helipilot? (
+			sys-firmware/chromeos-fpmcu-release-helipilot
+			sys-firmware/chromeos-zephyr-fpmcu-release-helipilot
+		)
 		fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
 		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
+		fpmcu_firmware_rosalia? ( sys-firmware/chromeos-fpmcu-release-rosalia )
 	)
-  libfprint? (
-      dev-libs/glib
-      sys-auth/libfprint
-    )
-  mafp? ( sys-auth/libmafp )
+	libfprint? (
+		dev-libs/glib
+		sys-auth/libfprint
+	)
+	mafp? ( sys-auth/libmafp )
 "
 
 DEPEND="
