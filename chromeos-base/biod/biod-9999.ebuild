@@ -34,6 +34,7 @@ IUSE="
 "
 # We must depend on libusb because libec headers make use of libusb.
 COMMON_DEPEND="
+  chromeos-base/featured
 	chromeos-base/chromeos-config-tools:=
 	chromeos-base/libec:=
 	chromeos-base/libhwsec:=[test?]
