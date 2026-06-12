@@ -2,8 +2,8 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
-CROS_WORKON_COMMIT="86656621c0ed9f92196ab93e176df6ee5c51c56f"
-CROS_WORKON_TREE=("80d4baed48e7c7c409c7ef85445449ee538906d7" "585ba4d7a418f3b666b104b27d683bbb6ba90d7e" "a2a00d640fbf4809c60065d23f775043ca22bc1e" "8a88fc27ad7194576005a9c85f3629996e4a15ad" "369a70bf72ea92298a6e2e8b7a500453e503a12f" "80939ad83b8001fb19198ab7e719925c124a4f6a" "fd1ab55bfbe3f597d446ba2bce050e54013f473a" "d308409644dd989573e0b6d181527438c5c76847" "f91b6afd5f2ae04ee9a2c19109a3a4a36f7659e6")
+CROS_WORKON_COMMIT="1b7a3e54d8c660cddc38d7869af656d801d22b19"
+CROS_WORKON_TREE=("518b50f8b6d01e95cbd933487ed7c6452ac4acb3" "20bdaf62d1bfa3654751447b9647b0dc01945b62" "16839d1d0fcecb39e52d1bc3a65aa02d62c1ee6d" "b8033e453c7d9518619e90fb100d7d90d7b4026d" "4934b6b332f2a3db7a26bad9f888607a4f12b440" "0db4f46cc41a6aacb17f45d7e65efb35784fb310" "b8c09b0737d26e92e8c1543f785a92a112de09cc" "563a31cc4efc68801a445225fd7c6c110280d904" "f91b6afd5f2ae04ee9a2c19109a3a4a36f7659e6")
 CROS_WORKON_USE_VCSID="1"
 CROS_WORKON_LOCALNAME="platform2"
 CROS_WORKON_PROJECT="chromiumos/platform2"
@@ -25,12 +25,18 @@ IUSE="
 	fp_on_power_button
 	fpmcu_firmware_bloonchipper
 	fpmcu_firmware_buccaneer
+	fpmcu_firmware_chobienia
+	fpmcu_firmware_chudow
 	fpmcu_firmware_dartmonkey
 	fpmcu_firmware_gwendolin
 	fpmcu_firmware_helipilot
 	fpmcu_firmware_nami
+	fpmcu_firmware_niedzica
 	fpmcu_firmware_nocturne
 	fpmcu_firmware_rosalia
+	fpmcu_firmware_sanok
+	fpmcu_firmware_srebrna
+	fpmcu_firmware_stobnica
 	fuzzer
 	test
 	libfprint
@@ -71,19 +77,19 @@ RDEPEND+="
 		fpmcu_firmware_bloonchipper? (
 			sys-firmware/chromeos-fpmcu-release-bloonchipper
 		)
-		fpmcu_firmware_buccaneer? (
-			sys-firmware/chromeos-fpmcu-release-buccaneer
-			sys-firmware/chromeos-zephyr-fpmcu-release-buccaneer
-		)
+		fpmcu_firmware_buccaneer? ( sys-firmware/chromeos-fpmcu-release-buccaneer )
+		fpmcu_firmware_chobienia? ( sys-firmware/chromeos-fpmcu-release-chobienia )
+		fpmcu_firmware_chudow? ( sys-firmware/chromeos-fpmcu-release-chudow )
 		fpmcu_firmware_dartmonkey? ( sys-firmware/chromeos-fpmcu-release-dartmonkey )
 		fpmcu_firmware_gwendolin? ( sys-firmware/chromeos-fpmcu-release-gwendolin )
-		fpmcu_firmware_helipilot? (
-			sys-firmware/chromeos-fpmcu-release-helipilot
-			sys-firmware/chromeos-zephyr-fpmcu-release-helipilot
-		)
+		fpmcu_firmware_helipilot? ( sys-firmware/chromeos-fpmcu-release-helipilot )
 		fpmcu_firmware_nami? ( sys-firmware/chromeos-fpmcu-release-nami )
+		fpmcu_firmware_niedzica? ( sys-firmware/chromeos-fpmcu-release-niedzica )
 		fpmcu_firmware_nocturne? ( sys-firmware/chromeos-fpmcu-release-nocturne )
 		fpmcu_firmware_rosalia? ( sys-firmware/chromeos-fpmcu-release-rosalia )
+		fpmcu_firmware_sanok? ( sys-firmware/chromeos-fpmcu-release-sanok )
+		fpmcu_firmware_srebrna? ( sys-firmware/chromeos-fpmcu-release-srebrna )
+		fpmcu_firmware_stobnica? ( sys-firmware/chromeos-fpmcu-release-stobnica )
 	)
 	libfprint? (
 		dev-libs/glib
